@@ -315,7 +315,7 @@ function renderDashboard() {
     <div class="section-header">
       <div>
         <div class="section-title">Good ${greeting()}, ${APP.user?.name?.split(' ')[0] || 'there'} 👋</div>
-        <div class="section-desc">${isManager ? 'Here\\'s your team overview for today.' : 'Here\\'s what you need to do today.'}</div>
+        <div class="section-desc">${isManager ? "Here's your team overview for today." : "Here's what you need to do today."}</div>
       </div>
       ${isManager ? `<div class="section-actions">
         <button class="btn btn-primary" onclick="openNewTaskModal()">＋ New Task</button>
