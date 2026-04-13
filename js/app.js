@@ -1707,11 +1707,12 @@ function editPocEntryByEncoded(encodedPocId) {
 }
 
 function deletePocEntry(pocId) {
-  const entry = DATA.pocs.find(item => item.id === pocId);
-  if (!entry || !canManagePocEntry(entry)) return;
-  if (!confirm('Delete this POC?')) return;
   const idx = DATA.pocs.findIndex(item => item.id === pocId);
-  if (idx !== -1) DATA.pocs.splice(idx, 1);
+  if (idx === -1) return;
+  const entry = DATA.pocs[idx];
+  if (!canManagePocEntry(entry)) return;
+  if (!confirm('Delete this POC?')) return;
+  DATA.pocs.splice(idx, 1);
   renderPoc();
 }
 
@@ -2027,11 +2028,12 @@ async function editDbCompanyEntryByEncoded(encodedCompanyId) {
 }
 
 function deleteDbCompanyEntry(companyId) {
-  const entry = DATA.dbCompanies.find(item => item.id === companyId);
-  if (!entry || !canEditDbEntry(entry)) return;
-  if (!confirm('Delete this Track DB entry?')) return;
   const idx = DATA.dbCompanies.findIndex(item => item.id === companyId);
-  if (idx !== -1) DATA.dbCompanies.splice(idx, 1);
+  if (idx === -1) return;
+  const entry = DATA.dbCompanies[idx];
+  if (!canEditDbEntry(entry)) return;
+  if (!confirm('Delete this Track DB entry?')) return;
+  DATA.dbCompanies.splice(idx, 1);
   renderTrackDb();
 }
 
