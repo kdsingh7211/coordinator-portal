@@ -45,6 +45,9 @@ const DATA = {
 };
 
 const DB_STATUS_OPTIONS = ['Mail Sent', 'Replied', 'Denied', 'Accepted'];
+const TEMP_PASSWORD = 'E-Cell@2025';
+const STORAGE_RESET_VERSION_KEY = 'cp-storage-reset-version';
+const STORAGE_RESET_VERSION = '2026-04-13-auth-reset-1';
 
 // ── HELPERS ──
 async function hashPassword(password) {
@@ -61,6 +64,18 @@ function loadUsers() {
   } catch {
     return [];
   }
+}
+
+function resetPersistedDataIfNeeded() {
+  const version = localStorage.getItem(STORAGE_RESET_VERSION_KEY);
+  if (version === STORAGE_RESET_VERSION) return;
+  localStorage.removeItem('cp-users');
+  localStorage.removeItem('cp-theme');
+  localStorage.removeItem('cp-sidebar-collapsed');
+  sessionStorage.removeItem('cp-session');
+  localStorage.setItem(STORAGE_RESET_VERSION_KEY, STORAGE_RESET_VERSION);
+  APP.theme = 'light';
+  APP.sidebarCollapsed = false;
 }
 
 function saveUsers(users) {
@@ -124,8 +139,7 @@ async function ensureSeedManagers() {
     APP.users = existing;
     return;
   }
-  const tempPassword = 'E-Cell@2025';
-  const passwordHash = await hashPassword(tempPassword);
+  const passwordHash = await hashPassword(TEMP_PASSWORD);
   const now = new Date().toISOString();
   const seedUsers = [
     {
@@ -849,8 +863,12 @@ function openTaskDetail(taskId) {
   const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user?.id;
   const canUpdateStatus = isManager || isAssignedCoordinator;
   const coord = getCoordinator(task.assignedTo);
+  const coordinators = getUsersByRole('coordinator');
   const p = calcTaskProgress(task);
   const encodedTaskId = encodeForAttr(task.id);
+  const coordinatorOptions = coordinators.length
+    ? coordinators.map(c => `<option value="${c.id}" ${task.assignedTo === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')
+    : '<option value="">No coordinators available</option>';
   const taskDbFileInputId = `task-db-file-${toDomSafeId(task.id)}`;
   const dbUploads = task.dbRequired && APP.user
     ? DATA.dbCompanies.filter(entry => entry.sourceTaskId === task.id && entry.coordinatorId === APP.user.id)
@@ -894,6 +912,12 @@ function openTaskDetail(taskId) {
         <div class="meta-key">Update Status</div>
         <select class="form-select mt-2" onchange="updateTaskStatusByEncoded('${encodedTaskId}', this.value, this)">
           ${['Not Started','In Progress','Done'].map(s => `<option ${task.status===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>` : ''}
+      ${isManager ? `<div class="meta-item">
+        <div class="meta-key">Reassign Coordinator</div>
+        <select class="form-select mt-2" onchange="updateTaskAssignmentByEncoded('${encodedTaskId}', this.value, this)" ${coordinators.length ? '' : 'disabled'}>
+          ${coordinatorOptions}
         </select>
       </div>` : ''}
     </div>
@@ -1022,6 +1046,31 @@ function updateTaskStatus(taskId, status, selectEl) {
 
 function updateTaskStatusByEncoded(encodedTaskId, status, selectEl) {
   updateTaskStatus(decodeFromAttr(encodedTaskId), status, selectEl);
+}
+
+function updateTaskAssignment(taskId, assignedTo, selectEl) {
+  const task = getTask(taskId);
+  if (!task || APP.role !== 'manager') return;
+  const nextAssignee = getUserById(assignedTo);
+  if (!nextAssignee || nextAssignee.role !== 'coordinator') {
+    if (selectEl) selectEl.value = task.assignedTo || '';
+    return;
+  }
+  const previousAssignee = getCoordinator(task.assignedTo);
+  task.assignedTo = assignedTo;
+  task.timeline.unshift({
+    date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+    title: 'Task Reassigned',
+    body: `Reassigned from ${previousAssignee?.name || 'Unassigned'} to ${nextAssignee.name}.`,
+    done: true
+  });
+  renderTasks(window._currentTaskFilter || 'all');
+  renderDashboard();
+  openTaskDetail(taskId);
+}
+
+function updateTaskAssignmentByEncoded(encodedTaskId, assignedTo, selectEl) {
+  updateTaskAssignment(decodeFromAttr(encodedTaskId), assignedTo, selectEl);
 }
 
 async function uploadTaskDbCsv(taskId) {
@@ -2490,8 +2539,9 @@ function renderSettings() {
         </div>
         <div class="form-row">
           <div class="form-group" style="flex:1">
-            <label class="form-label">Password</label>
-            <input class="form-input" id="tm-password" type="password" placeholder="Set a temporary password">
+            <label class="form-label" for="tm-password">Temporary Password</label>
+            <input class="form-input" id="tm-password" type="password" placeholder="Set temporary password for coordinator">
+            <div class="text-muted text-sm mt-2">Coordinator must change this password on first login.</div>
           </div>
           <div class="form-group" style="align-self:flex-end">
             <button class="btn btn-primary" onclick="addCoordinator()">Add Coordinator</button>
@@ -2577,10 +2627,11 @@ function renderSettings() {
       username,
       passwordHash,
       role: 'coordinator',
-      mustChangePassword: false,
+      mustChangePassword: true,
       createdAt: new Date().toISOString()
     });
     saveUsers(users);
+    alert('Coordinator created with temporary password. They must change it on first login.');
     renderSettings();
   };
   window.removeCoordinator = (id) => {
@@ -2793,6 +2844,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   (async () => {
+    resetPersistedDataIfNeeded();
     setTheme(APP.theme);
     await ensureSeedManagers();
     APP.users = loadUsers();
