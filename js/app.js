@@ -1022,7 +1022,7 @@ function renderResources() {
 
     <div class="tabs" id="res-tabs">
       <div class="tab active" data-cat="all">All</div>
-      ${cats.map(c => `<div class="tab" data-cat="${escapeHtml(encodeURIComponent(c))}">${escapeHtml(c)}</div>`).join('')}
+      ${cats.map(c => `<div class="tab" data-cat="${encodeURIComponent(c)}">${escapeHtml(c)}</div>`).join('')}
     </div>
 
     <div class="resource-grid" id="res-grid">
@@ -1059,7 +1059,7 @@ function renderResources() {
 function renderResourceCards(resources, isManager) {
   if (!resources.length) return `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🔍</div><div class="empty-title">No resources found</div></div>`;
   return resources.map(r => `
-    <div class="resource-card" data-resource-url="${escapeHtml(encodeURIComponent(sanitizeUrl(r.url)))}">
+    <div class="resource-card" data-resource-url="${encodeURIComponent(sanitizeUrl(r.url))}">
       <div class="resource-icon" style="background:var(--accent-light)">${escapeHtml(r.icon)}</div>
       <div class="resource-name">${escapeHtml(r.name)}</div>
       <div class="resource-desc">${escapeHtml(r.desc)}</div>
@@ -1164,7 +1164,7 @@ function saveResource() {
     resource.url = url;
   } else {
     DATA.resources.unshift({
-      id: 'r' + Date.now(),
+      id: createId('resource'),
       name,
       category,
       type,
