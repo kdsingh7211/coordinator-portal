@@ -1062,7 +1062,7 @@ function renderPoc() {
               <th>Category</th>
               <th>Email</th>
               <th>Contact Number</th>
-              ${isManager ? '<th>Coordinator Name</th><th>Added By</th>' : ''}
+              ${isManager ? '<th>Coordinator (if added by coordinator)</th><th>Added By</th>' : ''}
             </tr>
           </thead>
           <tbody>
@@ -1128,7 +1128,7 @@ function renderPoc() {
       ? Array.from(document.querySelectorAll('.poc-share-manager:checked')).map(el => el.value)
       : [];
     DATA.pocs.unshift({
-      id: 'poc' + Date.now(),
+      id: crypto.randomUUID(),
       name,
       organization,
       category,
