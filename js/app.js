@@ -234,7 +234,7 @@ function upsertDbCompanyEntries(contacts, { coordinatorId, coordinatorName, sour
       status: 'Mail Sent',
       comment: '',
       coordinatorId,
-      coordinatorName: coordinatorName || getCoordinator(coordinatorId).name || 'Unknown',
+      coordinatorName: coordinatorName || getCoordinator(coordinatorId)?.name || 'Unknown',
       sourceTaskId: sourceTaskId || '',
       contacts: ensureUniqueContacts([], [contact]),
       pocId: '',
@@ -341,6 +341,13 @@ async function importDbCsvFile(file, { coordinatorId, coordinatorName, sourceTas
 
 function hasDbUploadForTask(taskId, coordinatorId) {
   return DATA.dbCompanies.some(entry => entry.sourceTaskId === taskId && entry.coordinatorId === coordinatorId);
+}
+
+function shouldBlockTaskCompletion(task, status, isAssignedCoordinator, userId) {
+  if (status !== 'Done') return false;
+  if (!isAssignedCoordinator) return false;
+  if (!task?.dbRequired) return false;
+  return !hasDbUploadForTask(task.id, userId);
 }
 
 function statusBadge(status) {
@@ -895,7 +902,7 @@ function updateTaskStatus(taskId, status, selectEl) {
     if (selectEl) selectEl.value = prevStatus;
     return;
   }
-  if (status === 'Done' && isAssignedCoordinator && task.dbRequired && !hasDbUploadForTask(task.id, APP.user.id)) {
+  if (shouldBlockTaskCompletion(task, status, isAssignedCoordinator, APP.user.id)) {
     alert('This task requires DB upload. Please upload a CSV (Name, Email, Company) before marking it Done.');
     if (selectEl) selectEl.value = prevStatus;
     return;
@@ -1658,7 +1665,7 @@ function renderTrackDbTableRows(entries, { showCoordinator = false } = {}) {
           ${escapeHtml(entry.companyName)}
           <div class="text-sm text-muted mt-1">${contactCount} contact${contactCount !== 1 ? 's' : ''}</div>
         </td>
-        ${showCoordinator ? `<td>${escapeHtml(entry.coordinatorName || getCoordinator(entry.coordinatorId).name || 'Unknown')}</td>` : ''}
+        ${showCoordinator ? `<td>${escapeHtml(entry.coordinatorName || getCoordinator(entry.coordinatorId)?.name || 'Unknown')}</td>` : ''}
         <td>
           <select class="form-select" ${editable ? '' : 'disabled'} onchange="updateDbCompanyStatus('${entry.id}', this.value)">
             ${DB_STATUS_OPTIONS.map(status => `<option ${entry.status === status ? 'selected' : ''}>${status}</option>`).join('')}
@@ -1765,7 +1772,7 @@ function renderTrackDb() {
         <div class="card-body">
           ${groupedCoordinatorIds.length ? groupedCoordinatorIds.map(coordinatorId => {
             const rowEntries = grouped[coordinatorId] || [];
-            const coordinatorName = rowEntries[0]?.coordinatorName || getCoordinator(coordinatorId).name || 'Unknown';
+            const coordinatorName = rowEntries[0]?.coordinatorName || getCoordinator(coordinatorId)?.name || 'Unknown';
             const expanded = !!APP.trackDbExpandedCoordinators[coordinatorId];
             return `
               <div class="card mb-4" style="overflow:hidden">
@@ -1817,7 +1824,7 @@ async function uploadTrackDbCsv() {
       alert('Please select a coordinator for this upload.');
       return;
     }
-    coordinatorName = getCoordinator(coordinatorId).name || '';
+    coordinatorName = getCoordinator(coordinatorId)?.name || '';
   }
   const ok = await importDbCsvFile(file, { coordinatorId, coordinatorName, sourceTaskId: '' });
   if (!ok) return;
