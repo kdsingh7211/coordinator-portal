@@ -1292,7 +1292,8 @@ function hydrateSession() {
   let session = null;
   try {
     session = JSON.parse(sessionStorage.getItem('cp-session') || 'null');
-  } catch {
+  } catch (error) {
+    console.warn('Invalid session data detected. Clearing stored session.', error);
     sessionStorage.removeItem('cp-session');
   }
   if (!session) {
@@ -1424,6 +1425,14 @@ function initApp() {
 
 // ── STARTUP ──
 document.addEventListener('DOMContentLoaded', () => {
+  const loginForm = document.getElementById('login-form');
+  if (loginForm) {
+    loginForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      handleLogin();
+    });
+  }
+
   (async () => {
     setTheme(APP.theme);
     await ensureSeedManagers();
