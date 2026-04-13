@@ -135,13 +135,18 @@ function getCoordinatorStats(userId) {
 
 async function ensureSeedManagers() {
   const existing = loadUsers();
-  if (existing.length) {
+  const hasValidManagers = existing.some(u =>
+    u.role === 'manager' &&
+    typeof u.passwordHash === 'string' &&
+    u.passwordHash.length === 64
+  );
+  if (hasValidManagers) {
     APP.users = existing;
     return;
   }
   const passwordHash = await hashPassword(TEMP_PASSWORD);
   const now = new Date().toISOString();
-  const seedUsers = [
+  const seedManagers = [
     {
       id: crypto.randomUUID(),
       name: 'Chetan Jangid',
@@ -161,7 +166,8 @@ async function ensureSeedManagers() {
       createdAt: now
     }
   ];
-  saveUsers(seedUsers);
+  const nonManagerUsers = existing.filter(u => u.role !== 'manager');
+  saveUsers([...nonManagerUsers, ...seedManagers]);
 }
 function calcTaskProgress(task) {
   const subs = task.subtasks;
@@ -2665,11 +2671,12 @@ document.addEventListener('click', e => {
 });
 
 // ── LOGIN ──
-function handleLogin() {
+async function handleLogin() {
   if (APP.passwordChangeUserId) {
-    return handlePasswordChange();
+    await handlePasswordChange();
+    return;
   }
-  return handleSignIn();
+  await handleSignIn();
 }
 
 function logout() {
@@ -2729,13 +2736,9 @@ async function handleSignIn() {
   }
 
   const users = loadUsers();
-  const user = users.find(u => u.username === username);
-  if (!user) {
-    setLoginError('Invalid username or password.');
-    return;
-  }
   const passwordHash = await hashPassword(password);
-  if (passwordHash !== user.passwordHash) {
+  const user = users.find(u => u.username === username && u.passwordHash === passwordHash);
+  if (!user) {
     setLoginError('Invalid username or password.');
     return;
   }
@@ -2834,40 +2837,39 @@ function initApp() {
 }
 
 // ── STARTUP ──
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
-    loginForm.addEventListener('submit', (event) => {
+    loginForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      handleLogin();
+      await handleLogin();
     });
   }
 
-  (async () => {
-    resetPersistedDataIfNeeded();
-    setTheme(APP.theme);
-    await ensureSeedManagers();
-    APP.users = loadUsers();
-    hydrateSession();
+  resetPersistedDataIfNeeded();
+  setTheme(APP.theme);
+  await ensureSeedManagers();
+  APP.users = loadUsers();
+  console.log('Stored users after seeding:', APP.users);
+  hydrateSession();
 
-    if (APP.role && APP.user) {
-      document.getElementById('login-page').style.display = 'none';
-      document.getElementById('app').style.display = 'flex';
-      initApp();
-    } else {
-      document.getElementById('login-page').style.display = 'flex';
-      document.getElementById('app').style.display = 'none';
-      showLoginStep1();
+  if (APP.role && APP.user) {
+    document.getElementById('login-page').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    initApp();
+  } else {
+    document.getElementById('login-page').style.display = 'flex';
+    document.getElementById('app').style.display = 'none';
+    showLoginStep1();
+  }
+
+  // Click outside notif panel
+  document.addEventListener('click', e => {
+    if (APP.notifPanelOpen &&
+        !document.getElementById('notif-panel').contains(e.target) &&
+        !document.getElementById('notif-btn').contains(e.target)) {
+      APP.notifPanelOpen = false;
+      document.getElementById('notif-panel').classList.remove('open');
     }
-
-    // Click outside notif panel
-    document.addEventListener('click', e => {
-      if (APP.notifPanelOpen &&
-          !document.getElementById('notif-panel').contains(e.target) &&
-          !document.getElementById('notif-btn').contains(e.target)) {
-        APP.notifPanelOpen = false;
-        document.getElementById('notif-panel').classList.remove('open');
-      }
-    });
-  })();
+  });
 });
