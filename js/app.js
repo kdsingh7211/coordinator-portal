@@ -12,6 +12,7 @@ const APP = {
   currentPage: 'dashboard',
   notifPanelOpen: false,
   sidebarCollapsed: localStorage.getItem('cp-sidebar-collapsed') === 'true',
+  editingResourceId: null,
 };
 
 // ── SEED DATA ──
@@ -66,6 +67,23 @@ function getInitials(name) {
   const first = parts[0][0] || '';
   const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
   return (first + last).toUpperCase() || '?';
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function sanitizeUrl(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return '#';
+  if (raw === '#') return '#';
+  if (/^(https?:\/\/|mailto:|tel:)/i.test(raw)) return raw;
+  return '#';
 }
 
 function getUserById(id) {
@@ -144,7 +162,7 @@ function statusBadge(status) {
 }
 function catBadge(cat) {
   const map = { 'Incubators':'purple','Startups':'orange','Email Outreach':'blue','Database Work':'yellow','Events':'green','Research':'gray' };
-  return `<span class="badge badge-${map[cat]||'gray'}">${cat}</span>`;
+  return `<span class="badge badge-${map[cat]||'gray'}">${escapeHtml(cat)}</span>`;
 }
 function progressColor(p) { return p >= 80 ? 'green' : p >= 40 ? '' : 'red'; }
 
@@ -423,7 +441,7 @@ function renderTasks(filter) {
         </div>
         <select class="form-select" style="height:34px;width:auto" id="cat-filter" onchange="applyTaskFilters()">
           <option value="all">All Categories</option>
-          ${DATA.categories.map(c => `<option value="${c}">${c}</option>`).join('')}
+          ${DATA.categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
         </select>
         ${isManager ? `<button class="btn btn-primary" onclick="openNewTaskModal()">＋ New Task</button>` : ''}
       </div>
@@ -678,12 +696,74 @@ function addComment(taskId) {
 }
 
 // ── NEW/EDIT TASK MODAL ──
+function renderTaskCategoryOptions(selectedCategory) {
+  const selected = selectedCategory || DATA.categories[0] || '';
+  return DATA.categories.map(c => `<option ${selected===c?'selected':''}>${escapeHtml(c)}</option>`).join('');
+}
+
+function refreshTaskCategorySelect(selectedCategory) {
+  const select = document.getElementById('nt-cat');
+  if (!select) return;
+  select.innerHTML = renderTaskCategoryOptions(selectedCategory);
+}
+
+function addTaskCategory() {
+  if (APP.role !== 'manager') return;
+  const name = prompt('Enter new category name:')?.trim();
+  if (!name) return;
+  if (DATA.categories.some(c => c.toLowerCase() === name.toLowerCase())) {
+    alert('Category already exists.');
+    return;
+  }
+  DATA.categories.push(name);
+  refreshTaskCategorySelect(name);
+}
+
+function renameTaskCategory() {
+  if (APP.role !== 'manager') return;
+  const select = document.getElementById('nt-cat');
+  const current = select?.value;
+  if (!current) return;
+  const next = prompt('Edit category name:', current)?.trim();
+  if (!next || next === current) return;
+  if (DATA.categories.some(c => c.toLowerCase() === next.toLowerCase() && c !== current)) {
+    alert('Category already exists.');
+    return;
+  }
+  const idx = DATA.categories.findIndex(c => c === current);
+  if (idx === -1) return;
+  DATA.categories[idx] = next;
+  DATA.tasks.forEach(t => {
+    if (t.category === current) t.category = next;
+  });
+  refreshTaskCategorySelect(next);
+}
+
+function deleteTaskCategory() {
+  if (APP.role !== 'manager') return;
+  const select = document.getElementById('nt-cat');
+  const current = select?.value;
+  if (!current) return;
+  if (DATA.categories.length <= 1) {
+    alert('At least one category is required.');
+    return;
+  }
+  if (!confirm(`Delete "${current}" category? Tasks in this category will move to "Uncategorized".`)) return;
+  DATA.categories = DATA.categories.filter(c => c !== current);
+  if (!DATA.categories.includes('Uncategorized')) DATA.categories.push('Uncategorized');
+  DATA.tasks.forEach(t => {
+    if (t.category === current) t.category = 'Uncategorized';
+  });
+  refreshTaskCategorySelect('Uncategorized');
+}
+
 function openNewTaskModal() {
   const modal = document.getElementById('new-task-modal');
   const coordinators = getUsersByRole('coordinator');
   const coordinatorOptions = coordinators.length
-    ? coordinators.map(c => `<option value="${c.id}">${c.name}</option>`).join('')
+    ? coordinators.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')
     : `<option value="" disabled selected>No coordinators yet</option>`;
+  const defaultCategory = DATA.categories[0] || '';
   document.getElementById('new-task-form').innerHTML = `
     <div class="form-group">
       <label class="form-label">Task Name</label>
@@ -691,9 +771,16 @@ function openNewTaskModal() {
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Category</label>
+        <label class="form-label d-flex items-center" style="justify-content:space-between;gap:8px">
+          <span>Category</span>
+          ${APP.role === 'manager' ? `<span class="d-flex gap-2">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addTaskCategory()">＋</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="renameTaskCategory()">✏️</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="deleteTaskCategory()">🗑️</button>
+          </span>` : ''}
+        </label>
         <select class="form-select" id="nt-cat">
-          ${DATA.categories.map(c => `<option>${c}</option>`).join('')}
+          ${renderTaskCategoryOptions(defaultCategory)}
         </select>
       </div>
       <div class="form-group">
@@ -752,20 +839,27 @@ function openEditTaskModal(taskId) {
   document.getElementById('new-task-form').innerHTML = `
     <div class="form-group">
       <label class="form-label">Task Name</label>
-      <input class="form-input" id="nt-name" value="${task.name}">
+      <input class="form-input" id="nt-name" value="${escapeHtml(task.name)}">
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Category</label>
+        <label class="form-label d-flex items-center" style="justify-content:space-between;gap:8px">
+          <span>Category</span>
+          ${APP.role === 'manager' ? `<span class="d-flex gap-2">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addTaskCategory()">＋</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="renameTaskCategory()">✏️</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="deleteTaskCategory()">🗑️</button>
+          </span>` : ''}
+        </label>
         <select class="form-select" id="nt-cat">
-          ${DATA.categories.map(c => `<option ${task.category===c?'selected':''}>${c}</option>`).join('')}
+          ${renderTaskCategoryOptions(task.category)}
         </select>
       </div>
       <div class="form-group">
         <label class="form-label">Assigned To</label>
         <select class="form-select" id="nt-assign">
           ${coordinators.length
-            ? coordinators.map(c => `<option value="${c.id}" ${task.assignedTo===c.id?'selected':''}>${c.name}</option>`).join('')
+            ? coordinators.map(c => `<option value="${c.id}" ${task.assignedTo===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')
             : `<option value="" disabled selected>No coordinators yet</option>`}
         </select>
       </div>
@@ -882,6 +976,7 @@ function renderTimeline() {
 // ── RESOURCES ──
 function renderResources() {
   const el = document.getElementById('page-resources');
+  const isManager = APP.role === 'manager';
   const cats = [...new Set(DATA.resources.map(r => r.category))];
 
   el.innerHTML = `
@@ -895,44 +990,140 @@ function renderResources() {
           <span class="search-icon">🔍</span>
           <input type="text" placeholder="Search…" oninput="searchResources(this.value)" id="res-search">
         </div>
+        ${isManager ? `<button class="btn btn-primary" onclick="openResourceModal()">＋ Add Resource</button>` : ''}
       </div>
     </div>
 
     <div class="tabs" id="res-tabs">
       <div class="tab active" onclick="filterRes('all', this)">All</div>
-      ${cats.map(c => `<div class="tab" onclick="filterRes('${c}', this)">${c}</div>`).join('')}
+      ${cats.map(c => `<div class="tab" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</div>`).join('')}
     </div>
 
     <div class="resource-grid" id="res-grid">
-      ${renderResourceCards(DATA.resources)}
+      ${renderResourceCards(DATA.resources, isManager)}
     </div>
   `;
+
+  document.querySelectorAll('#res-tabs [data-cat]').forEach(tab => {
+    tab.onclick = () => window.filterRes(tab.dataset.cat, tab);
+  });
 
   window.filterRes = (cat, tab) => {
     document.querySelectorAll('#res-tabs .tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
     const filtered = cat === 'all' ? DATA.resources : DATA.resources.filter(r => r.category === cat);
-    document.getElementById('res-grid').innerHTML = renderResourceCards(filtered);
+    document.getElementById('res-grid').innerHTML = renderResourceCards(filtered, isManager);
   };
   window.searchResources = (q) => {
     const filtered = DATA.resources.filter(r =>
       r.name.toLowerCase().includes(q.toLowerCase()) ||
       r.desc.toLowerCase().includes(q.toLowerCase())
     );
-    document.getElementById('res-grid').innerHTML = renderResourceCards(filtered);
+    document.getElementById('res-grid').innerHTML = renderResourceCards(filtered, isManager);
   };
 }
 
-function renderResourceCards(resources) {
+function renderResourceCards(resources, isManager) {
   if (!resources.length) return `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🔍</div><div class="empty-title">No resources found</div></div>`;
   return resources.map(r => `
-    <div class="resource-card" onclick="window.open('${r.url}','_blank')">
-      <div class="resource-icon" style="background:var(--accent-light)">${r.icon}</div>
-      <div class="resource-name">${r.name}</div>
-      <div class="resource-desc">${r.desc}</div>
-      <div class="resource-type">${r.type}</div>
+    <div class="resource-card" onclick="window.open('${escapeHtml(sanitizeUrl(r.url))}','_blank','noopener,noreferrer')">
+      <div class="resource-icon" style="background:var(--accent-light)">${escapeHtml(r.icon)}</div>
+      <div class="resource-name">${escapeHtml(r.name)}</div>
+      <div class="resource-desc">${escapeHtml(r.desc)}</div>
+      <div class="resource-type">${escapeHtml(r.type)}</div>
+      ${isManager ? `
+      <div class="d-flex gap-2 mt-3" onclick="event.stopPropagation()">
+        <button class="btn btn-ghost btn-sm" onclick="openResourceModal('${r.id}')">✏️ Edit</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteResource('${r.id}')">🗑️ Delete</button>
+      </div>` : ''}
     </div>
   `).join('');
+}
+
+function openResourceModal(resourceId) {
+  if (APP.role !== 'manager') return;
+  APP.editingResourceId = resourceId || null;
+  const resource = DATA.resources.find(r => r.id === resourceId) || null;
+  const title = document.getElementById('resource-modal-title');
+  const form = document.getElementById('resource-form');
+  if (!title || !form) return;
+  title.textContent = resource ? 'Edit Resource' : 'Add Resource';
+  form.innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input" id="res-name" value="${escapeHtml(resource?.name || '')}" placeholder="Resource name">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <input class="form-input" id="res-category" value="${escapeHtml(resource?.category || '')}" placeholder="e.g. Templates">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <input class="form-input" id="res-type" value="${escapeHtml(resource?.type || '')}" placeholder="e.g. Google Sheet">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Icon</label>
+        <input class="form-input" id="res-icon" value="${escapeHtml(resource?.icon || '📚')}" placeholder="Emoji icon">
+      </div>
+      <div class="form-group">
+        <label class="form-label">URL</label>
+        <input class="form-input" id="res-url" value="${escapeHtml(resource?.url || '#')}" placeholder="https://...">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <textarea class="form-input" id="res-desc" rows="3" placeholder="Short description">${escapeHtml(resource?.desc || '')}</textarea>
+    </div>
+  `;
+  openModal('resource-modal');
+}
+
+function saveResource() {
+  if (APP.role !== 'manager') return;
+  const name = document.getElementById('res-name')?.value?.trim();
+  const category = document.getElementById('res-category')?.value?.trim();
+  const type = document.getElementById('res-type')?.value?.trim();
+  const icon = document.getElementById('res-icon')?.value?.trim() || '📚';
+  const desc = document.getElementById('res-desc')?.value?.trim();
+  const url = sanitizeUrl(document.getElementById('res-url')?.value);
+  if (!name || !category || !type || !desc) {
+    alert('Please fill in all required resource fields.');
+    return;
+  }
+  if (APP.editingResourceId) {
+    const resource = DATA.resources.find(r => r.id === APP.editingResourceId);
+    if (!resource) return;
+    resource.name = name;
+    resource.category = category;
+    resource.type = type;
+    resource.icon = icon;
+    resource.desc = desc;
+    resource.url = url;
+  } else {
+    DATA.resources.unshift({
+      id: 'r' + Date.now(),
+      name,
+      category,
+      type,
+      icon,
+      desc,
+      url
+    });
+  }
+  closeModal('resource-modal');
+  APP.editingResourceId = null;
+  renderResources();
+}
+
+function deleteResource(resourceId) {
+  if (APP.role !== 'manager') return;
+  if (!confirm('Delete this resource?')) return;
+  const idx = DATA.resources.findIndex(r => r.id === resourceId);
+  if (idx !== -1) DATA.resources.splice(idx, 1);
+  renderResources();
 }
 
 // ── NOTIFICATIONS PAGE ──
@@ -1242,6 +1433,7 @@ function openModal(id) {
 function closeModal(id) {
   document.getElementById(id)?.classList.remove('open');
   document.body.style.overflow = '';
+  if (id === 'resource-modal') APP.editingResourceId = null;
   document.getElementById('new-task-modal-title').textContent = 'New Task';
   document.getElementById('save-new-task-btn').onclick = saveNewTask;
 }
