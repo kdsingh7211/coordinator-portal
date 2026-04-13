@@ -21,23 +21,21 @@
     <div class="login-sub">Task management for coordinators and managers.</div>
 
     <div id="login-step1">
-      <div class="form-label" style="margin-bottom:var(--sp-3)">I am a…</div>
-      <div class="role-cards">
-        <div class="role-card" onclick="selectRole('manager', this)">
-          <div class="role-card-title">🧑‍💼 Manager</div>
-          <div class="role-card-desc">Create tasks, assign coordinators, track team progress</div>
-        </div>
-        <div class="role-card" onclick="selectRole('coordinator', this)">
-          <div class="role-card-title">🙋 Coordinator</div>
-          <div class="role-card-desc">View my tasks, update progress, access resources</div>
-        </div>
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input class="form-input" id="login-username" autocomplete="username" placeholder="e.g. chetan">
       </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-input" id="login-password" type="password" autocomplete="current-password" placeholder="••••••••">
+      </div>
+      <div id="login-error" class="text-sm" style="color:var(--danger);display:none"></div>
     </div>
 
     <div id="login-step2" style="display:none; margin-top:var(--sp-4)"></div>
 
-    <button id="login-proceed-btn" class="btn btn-primary w-full btn-lg" style="display:none;margin-top:var(--sp-4);justify-content:center" onclick="handleLogin()">
-      Continue →
+    <button id="login-proceed-btn" class="btn btn-primary w-full btn-lg" style="margin-top:var(--sp-4);justify-content:center" onclick="handleLogin()">
+      Sign In
     </button>
 
     <div style="margin-top:var(--sp-6);padding-top:var(--sp-4);border-top:1px solid var(--border)">

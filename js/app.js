@@ -5,8 +5,10 @@
 // ── APP STATE ──
 const APP = {
   theme: localStorage.getItem('cp-theme') || 'light',
-  role: localStorage.getItem('cp-role') || null,
-  user: JSON.parse(localStorage.getItem('cp-user') || 'null'),
+  role: null,
+  user: null,
+  users: [],
+  passwordChangeUserId: null,
   currentPage: 'dashboard',
   notifPanelOpen: false,
   sidebarCollapsed: localStorage.getItem('cp-sidebar-collapsed') === 'true',
@@ -14,132 +16,9 @@ const APP = {
 
 // ── SEED DATA ──
 const DATA = {
-  coordinators: [
-    { id: 'c1', name: 'Arjun Sharma', initials: 'AS', email: 'arjun@startup.in', performance: 87 },
-    { id: 'c2', name: 'Priya Mehta',  initials: 'PM', email: 'priya@startup.in',  performance: 92 },
-    { id: 'c3', name: 'Rahul Nair',   initials: 'RN', email: 'rahul@startup.in',   performance: 74 },
-    { id: 'c4', name: 'Sneha Iyer',   initials: 'SI', email: 'sneha@startup.in',   performance: 68 },
-    { id: 'c5', name: 'Dev Patel',    initials: 'DP', email: 'dev@startup.in',    performance: 81 },
-    { id: 'c6', name: 'Ananya Gupta', initials: 'AG', email: 'ananya@startup.in', performance: 95 },
-  ],
-  managers: [
-    { id: 'm1', name: 'Vikram Singh',  initials: 'VS', email: 'vikram@startup.in'  },
-    { id: 'm2', name: 'Nisha Kapoor',  initials: 'NK', email: 'nisha@startup.in'  },
-  ],
+  coordinators: [],
   categories: ['Incubators', 'Startups', 'Email Outreach', 'Database Work', 'Events', 'Research'],
-  tasks: [
-    {
-      id: 't1', name: 'Incubator Outreach – Phase 1',
-      category: 'Incubators', assignedTo: 'c1',
-      status: 'In Progress', deadline: '2025-08-15',
-      comments: [
-        { user: 'Arjun Sharma', initials: 'AS', text: 'Sent 50 emails today, waiting for replies', time: '2h ago' },
-        { user: 'Vikram Singh', initials: 'VS', text: 'Good progress, focus on Tier 1 incubators first', time: '1h ago' },
-      ],
-      subtasks: [
-        { id: 's1', name: 'Database Created', type: 'checkbox', value: true, target: null },
-        { id: 's2', name: 'Emails Sent', type: 'number', value: 78, target: 150 },
-        { id: 's3', name: 'Replies Received', type: 'number', value: 14, target: 50 },
-        { id: 's4', name: 'Meetings Scheduled', type: 'number', value: 4, target: 10 },
-        { id: 's5', name: 'Follow-ups Done', type: 'number', value: 20, target: 50 },
-      ],
-      timeline: [
-        { date: 'Jul 1', title: 'Task Created', body: 'Assigned to Arjun Sharma', done: true },
-        { date: 'Jul 5', title: 'Database Ready', body: '150 incubators identified and verified', done: true },
-        { date: 'Jul 10', title: 'Outreach Started', body: 'First batch of emails sent', done: true },
-        { date: 'Aug 1', title: 'Mid-point Review', body: 'Scheduled check-in with manager', done: false },
-        { date: 'Aug 15', title: 'Deadline', body: 'Task completion target', done: false },
-      ]
-    },
-    {
-      id: 't2', name: 'Startup Database — Q3',
-      category: 'Database Work', assignedTo: 'c2',
-      status: 'In Progress', deadline: '2025-07-30',
-      comments: [
-        { user: 'Priya Mehta', initials: 'PM', text: 'Added 200 entries so far, cleaning duplicates', time: '3h ago' },
-      ],
-      subtasks: [
-        { id: 's1', name: 'Entries Added',   type: 'number', value: 340, target: 500 },
-        { id: 's2', name: 'Verified',         type: 'number', value: 200, target: 500 },
-        { id: 's3', name: 'Cleaned (Dupes)',  type: 'number', value: 45,  target: 100 },
-        { id: 's4', name: 'LinkedIn Sourced', type: 'number', value: 180, target: 300 },
-      ],
-      timeline: [
-        { date: 'Jun 20', title: 'Task Created', body: 'Assigned to Priya Mehta', done: true },
-        { date: 'Jul 1', title: 'Phase 1 Data', body: '200 entries collected', done: true },
-        { date: 'Jul 30', title: 'Deadline', body: '500 verified entries target', done: false },
-      ]
-    },
-    {
-      id: 't3', name: 'Email Campaign — August',
-      category: 'Email Outreach', assignedTo: 'c3',
-      status: 'Not Started', deadline: '2025-08-20',
-      comments: [],
-      subtasks: [
-        { id: 's1', name: 'Email List Ready', type: 'checkbox', value: false, target: null },
-        { id: 's2', name: 'Templates Drafted', type: 'checkbox', value: false, target: null },
-        { id: 's3', name: 'Emails Sent', type: 'number', value: 0, target: 200 },
-        { id: 's4', name: 'Opened', type: 'number', value: 0, target: 100 },
-        { id: 's5', name: 'Replied', type: 'number', value: 0, target: 40 },
-        { id: 's6', name: 'Follow-ups Done', type: 'number', value: 0, target: 40 },
-      ],
-      timeline: [
-        { date: 'Jul 15', title: 'Task Created', body: 'Assigned to Rahul Nair', done: true },
-        { date: 'Aug 1', title: 'Prep Deadline', body: 'All templates ready', done: false },
-        { date: 'Aug 20', title: 'Campaign End', body: 'Final report due', done: false },
-      ]
-    },
-    {
-      id: 't4', name: 'Startup Research — Fintech',
-      category: 'Research', assignedTo: 'c4',
-      status: 'Done', deadline: '2025-07-10',
-      comments: [
-        { user: 'Sneha Iyer', initials: 'SI', text: 'All 50 fintech startups profiled and submitted', time: '2d ago' },
-      ],
-      subtasks: [
-        { id: 's1', name: 'Startups Identified', type: 'number', value: 50, target: 50 },
-        { id: 's2', name: 'Profiles Completed',  type: 'number', value: 50, target: 50 },
-        { id: 's3', name: 'Report Submitted',    type: 'checkbox', value: true, target: null },
-      ],
-      timeline: [
-        { date: 'Jun 25', title: 'Task Created', body: 'Assigned to Sneha Iyer', done: true },
-        { date: 'Jul 5', title: 'Research Done', body: '50 profiles completed', done: true },
-        { date: 'Jul 10', title: 'Submitted', body: 'Report delivered to manager', done: true },
-      ]
-    },
-    {
-      id: 't5', name: 'Incubator Partnerships',
-      category: 'Incubators', assignedTo: 'c5',
-      status: 'In Progress', deadline: '2025-09-01',
-      comments: [],
-      subtasks: [
-        { id: 's1', name: 'Partnerships Identified', type: 'number', value: 8, target: 20 },
-        { id: 's2', name: 'Emails Sent', type: 'number', value: 12, target: 30 },
-        { id: 's3', name: 'MoUs Signed', type: 'number', value: 2, target: 5 },
-      ],
-      timeline: [
-        { date: 'Jul 10', title: 'Task Created', body: 'Assigned to Dev Patel', done: true },
-        { date: 'Sep 1', title: 'Deadline', body: '5 partnerships signed', done: false },
-      ]
-    },
-    {
-      id: 't6', name: 'Tech Startup Database',
-      category: 'Database Work', assignedTo: 'c6',
-      status: 'In Progress', deadline: '2025-08-10',
-      comments: [
-        { user: 'Ananya Gupta', initials: 'AG', text: 'Almost done, just verification pending', time: '5h ago' },
-      ],
-      subtasks: [
-        { id: 's1', name: 'Entries Added',   type: 'number', value: 420, target: 450 },
-        { id: 's2', name: 'Verified',         type: 'number', value: 380, target: 450 },
-        { id: 's3', name: 'Sector Tagged',    type: 'number', value: 400, target: 450 },
-      ],
-      timeline: [
-        { date: 'Jul 1', title: 'Task Created', body: 'Assigned to Ananya Gupta', done: true },
-        { date: 'Aug 10', title: 'Deadline', body: '450 verified entries', done: false },
-      ]
-    },
-  ],
+  tasks: [],
   resources: [
     { id: 'r1', name: 'Cold Email Template', desc: 'Standard outreach email for incubators and startups', type: 'Email Template', icon: '📧', category: 'Templates', url: '#' },
     { id: 'r2', name: 'Follow-up Email #1', desc: 'First follow-up, send 3 days after initial email', type: 'Email Template', icon: '📨', category: 'Templates', url: '#' },
@@ -152,16 +31,95 @@ const DATA = {
     { id: 'r9', name: 'Weekly Report Form', desc: 'Submit your weekly progress report here', type: 'Google Form', icon: '🔗', category: 'Links', url: '#' },
     { id: 'r10', name: 'Incubator Master List', desc: 'Complete database of 500+ Indian incubators', type: 'Google Sheet', icon: '🏢', category: 'Links', url: '#' },
   ],
-  notifications: [
-    { id: 'n1', text: '<strong>Vikram Singh</strong> commented on your task "Incubator Outreach – Phase 1"', time: '1h ago', read: false },
-    { id: 'n2', text: 'Deadline approaching: <strong>Startup Database — Q3</strong> is due in 3 days', time: '3h ago', read: false },
-    { id: 'n3', text: 'New task assigned: <strong>Email Campaign — August</strong>', time: '1d ago', read: true },
-    { id: 'n4', text: '<strong>Nisha Kapoor</strong> updated your task progress to 60%', time: '2d ago', read: true },
-    { id: 'n5', text: 'Deadline approaching: <strong>Tech Startup Database</strong> is due in 7 days', time: '2d ago', read: true },
-  ]
+  notifications: []
 };
 
 // ── HELPERS ──
+async function hashPassword(password) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function loadUsers() {
+  try {
+    return JSON.parse(localStorage.getItem('cp-users') || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function saveUsers(users) {
+  localStorage.setItem('cp-users', JSON.stringify(users));
+  APP.users = users;
+}
+
+function normalizeUsername(username) {
+  return (username || '').trim().toLowerCase();
+}
+
+function getInitials(name) {
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  const first = parts[0][0] || '';
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
+  return (first + last).toUpperCase() || '?';
+}
+
+function getUserById(id) {
+  return APP.users.find(u => u.id === id) || null;
+}
+
+function getUsersByRole(role) {
+  return APP.users.filter(u => u.role === role).map(u => ({
+    ...u,
+    initials: getInitials(u.name)
+  }));
+}
+
+function getCoordinatorStats(userId) {
+  const tasks = DATA.tasks.filter(t => t.assignedTo === userId);
+  const done = tasks.filter(t => t.status === 'Done').length;
+  const inProg = tasks.filter(t => t.status === 'In Progress').length;
+  const performance = tasks.length
+    ? Math.round(tasks.reduce((s, t) => s + calcTaskProgress(t), 0) / tasks.length)
+    : 0;
+  return { tasks, done, inProg, performance };
+}
+
+async function ensureSeedManagers() {
+  const existing = loadUsers();
+  if (existing.length) {
+    APP.users = existing;
+    return;
+  }
+  const tempPassword = 'E-Cell@2025';
+  const passwordHash = await hashPassword(tempPassword);
+  const now = new Date().toISOString();
+  const seedUsers = [
+    {
+      id: crypto.randomUUID(),
+      name: 'Chetan Jangid',
+      username: 'chetan',
+      passwordHash,
+      role: 'manager',
+      mustChangePassword: true,
+      createdAt: now
+    },
+    {
+      id: crypto.randomUUID(),
+      name: 'Karandeep Singh',
+      username: 'karandeep',
+      passwordHash,
+      role: 'manager',
+      mustChangePassword: true,
+      createdAt: now
+    }
+  ];
+  saveUsers(seedUsers);
+}
 function calcTaskProgress(task) {
   const subs = task.subtasks;
   if (!subs || !subs.length) return 0;
@@ -173,7 +131,11 @@ function calcTaskProgress(task) {
   return total ? Math.round((done / total) * 100) : 0;
 }
 
-function getCoordinator(id) { return DATA.coordinators.find(c => c.id === id) || {}; }
+function getCoordinator(id) {
+  const coord = APP.users.find(u => u.id === id && u.role === 'coordinator');
+  if (!coord) return {};
+  return { ...coord, initials: getInitials(coord.name) };
+}
 function getTask(id) { return DATA.tasks.find(t => t.id === id); }
 
 function statusBadge(status) {
@@ -301,7 +263,7 @@ function renderDashboard() {
   const done = DATA.tasks.filter(t => t.status === 'Done').length;
   const inProg = DATA.tasks.filter(t => t.status === 'In Progress').length;
   const notStarted = DATA.tasks.filter(t => t.status === 'Not Started').length;
-  const avgProg = Math.round(DATA.tasks.reduce((s,t) => s + calcTaskProgress(t), 0) / total);
+  const avgProg = total ? Math.round(DATA.tasks.reduce((s,t) => s + calcTaskProgress(t), 0) / total) : 0;
 
   const isManager = APP.role === 'manager';
   const el = document.getElementById('page-dashboard');
@@ -350,7 +312,7 @@ function renderDashboard() {
       ${isManager ? `<div class="stat-card">
         <div class="stat-icon" style="background:var(--orange-light);color:var(--orange)">👥</div>
         <div class="stat-label">Coordinators</div>
-        <div class="stat-value">${DATA.coordinators.length}</div>
+        <div class="stat-value">${getUsersByRole('coordinator').length}</div>
         <div class="stat-change">Active members</div>
       </div>` : ''}
     </div>
@@ -399,22 +361,21 @@ function renderDashboard() {
     <div class="mt-6 card">
       <div class="card-header"><span class="card-title">Team Performance</span></div>
       <div class="card-body">
-        ${DATA.coordinators.map(c => {
-          const myTasks = DATA.tasks.filter(t => t.assignedTo === c.id);
-          const myDone = myTasks.filter(t => t.status === 'Done').length;
+        ${getUsersByRole('coordinator').map(c => {
+          const stats = getCoordinatorStats(c.id);
           return `
           <div class="d-flex items-center gap-3 mb-4">
             <div class="avatar">${c.initials}</div>
             <div class="flex-1">
               <div class="d-flex items-center gap-2 mb-2" style="justify-content:space-between">
                 <span class="fw-500" style="font-size:13px">${c.name}</span>
-                <span class="mono text-sm text-muted">${myDone}/${myTasks.length} done</span>
+                <span class="mono text-sm text-muted">${stats.done}/${stats.tasks.length} done</span>
               </div>
               <div class="progress-bar" style="height:5px">
-                <div class="progress-fill ${progressColor(c.performance)}" style="width:${c.performance}%"></div>
+                <div class="progress-fill ${progressColor(stats.performance)}" style="width:${stats.performance}%"></div>
               </div>
             </div>
-            <span class="mono fw-500" style="font-size:13px;min-width:36px;text-align:right">${c.performance}%</span>
+            <span class="mono fw-500" style="font-size:13px;min-width:36px;text-align:right">${stats.performance}%</span>
           </div>`;
         }).join('')}
       </div>
@@ -719,6 +680,10 @@ function addComment(taskId) {
 // ── NEW/EDIT TASK MODAL ──
 function openNewTaskModal() {
   const modal = document.getElementById('new-task-modal');
+  const coordinators = getUsersByRole('coordinator');
+  const coordinatorOptions = coordinators.length
+    ? coordinators.map(c => `<option value="${c.id}">${c.name}</option>`).join('')
+    : `<option value="" disabled selected>No coordinators yet</option>`;
   document.getElementById('new-task-form').innerHTML = `
     <div class="form-group">
       <label class="form-label">Task Name</label>
@@ -734,7 +699,7 @@ function openNewTaskModal() {
       <div class="form-group">
         <label class="form-label">Assigned To</label>
         <select class="form-select" id="nt-assign">
-          ${DATA.coordinators.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+          ${coordinatorOptions}
         </select>
       </div>
     </div>
@@ -757,11 +722,16 @@ function openNewTaskModal() {
 function saveNewTask() {
   const name = document.getElementById('nt-name')?.value?.trim();
   if (!name) { alert('Please enter a task name'); return; }
+  const assignedTo = document.getElementById('nt-assign')?.value || '';
+  if (!assignedTo) {
+    alert('Please add a coordinator before assigning tasks.');
+    return;
+  }
   const newTask = {
     id: 't' + Date.now(),
     name,
     category: document.getElementById('nt-cat')?.value,
-    assignedTo: document.getElementById('nt-assign')?.value,
+    assignedTo,
     status: document.getElementById('nt-status')?.value || 'Not Started',
     deadline: document.getElementById('nt-deadline')?.value,
     comments: [],
@@ -777,6 +747,7 @@ function saveNewTask() {
 function openEditTaskModal(taskId) {
   const task = getTask(taskId);
   if (!task) return;
+  const coordinators = getUsersByRole('coordinator');
   document.getElementById('new-task-modal-title').textContent = 'Edit Task';
   document.getElementById('new-task-form').innerHTML = `
     <div class="form-group">
@@ -793,7 +764,9 @@ function openEditTaskModal(taskId) {
       <div class="form-group">
         <label class="form-label">Assigned To</label>
         <select class="form-select" id="nt-assign">
-          ${DATA.coordinators.map(c => `<option value="${c.id}" ${task.assignedTo===c.id?'selected':''}>${c.name}</option>`).join('')}
+          ${coordinators.length
+            ? coordinators.map(c => `<option value="${c.id}" ${task.assignedTo===c.id?'selected':''}>${c.name}</option>`).join('')
+            : `<option value="" disabled selected>No coordinators yet</option>`}
         </select>
       </div>
     </div>
@@ -1035,10 +1008,15 @@ function renderPerformance() {
       <div><div class="section-title">Team Performance</div><div class="section-desc">Coordinator-level metrics</div></div>
     </div>
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-icon" style="background:var(--accent-light);color:var(--accent)">👥</div><div class="stat-label">Coordinators</div><div class="stat-value">${DATA.coordinators.length}</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:var(--accent-light);color:var(--accent)">👥</div><div class="stat-label">Coordinators</div><div class="stat-value">${getUsersByRole('coordinator').length}</div></div>
       <div class="stat-card"><div class="stat-icon" style="background:var(--green-light);color:var(--green)">📋</div><div class="stat-label">Total Tasks</div><div class="stat-value">${DATA.tasks.length}</div></div>
       <div class="stat-card"><div class="stat-icon" style="background:var(--yellow-light);color:var(--yellow)">✅</div><div class="stat-label">Completed</div><div class="stat-value">${DATA.tasks.filter(t=>t.status==='Done').length}</div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:var(--purple-light);color:var(--purple)">📈</div><div class="stat-label">Avg Score</div><div class="stat-value">${Math.round(DATA.coordinators.reduce((s,c)=>s+c.performance,0)/DATA.coordinators.length)}%</div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:var(--purple-light);color:var(--purple)">📈</div><div class="stat-label">Avg Score</div><div class="stat-value">${(() => {
+        const coords = getUsersByRole('coordinator');
+        if (!coords.length) return 0;
+        const avg = Math.round(coords.reduce((s, c) => s + getCoordinatorStats(c.id).performance, 0) / coords.length);
+        return avg;
+      })()}%</div></div>
     </div>
 
     <div class="card">
@@ -1047,10 +1025,8 @@ function renderPerformance() {
         <table>
           <thead><tr><th>#</th><th>Coordinator</th><th>Tasks Done</th><th>In Progress</th><th>Performance</th></tr></thead>
           <tbody>
-            ${[...DATA.coordinators].sort((a,b)=>b.performance-a.performance).map((c,i) => {
-              const myTasks = DATA.tasks.filter(t => t.assignedTo === c.id);
-              const done = myTasks.filter(t => t.status === 'Done').length;
-              const inProg = myTasks.filter(t => t.status === 'In Progress').length;
+            ${[...getUsersByRole('coordinator')].sort((a,b)=>getCoordinatorStats(b.id).performance - getCoordinatorStats(a.id).performance).map((c,i) => {
+              const stats = getCoordinatorStats(c.id);
               return `<tr>
                 <td class="mono text-muted">${i+1}</td>
                 <td>
@@ -1058,16 +1034,15 @@ function renderPerformance() {
                     <div class="avatar">${c.initials}</div>
                     <div>
                       <div class="fw-500">${c.name}</div>
-                      <div class="text-sm text-muted">${c.email}</div>
                     </div>
                   </div>
                 </td>
-                <td><span class="badge badge-green">${done}</span></td>
-                <td><span class="badge badge-blue">${inProg}</span></td>
+                <td><span class="badge badge-green">${stats.done}</span></td>
+                <td><span class="badge badge-blue">${stats.inProg}</span></td>
                 <td>
                   <div class="progress-wrap">
-                    <div class="progress-bar"><div class="progress-fill ${progressColor(c.performance)}" style="width:${c.performance}%"></div></div>
-                    <span class="progress-pct">${c.performance}%</span>
+                    <div class="progress-bar"><div class="progress-fill ${progressColor(stats.performance)}" style="width:${stats.performance}%"></div></div>
+                    <span class="progress-pct">${stats.performance}%</span>
                   </div>
                 </td>
               </tr>`;
@@ -1082,6 +1057,7 @@ function renderPerformance() {
 // ── SETTINGS ──
 function renderSettings() {
   const el = document.getElementById('page-settings');
+  const isManager = APP.role === 'manager';
   el.innerHTML = `
     <div class="section-header">
       <div><div class="section-title">Settings</div><div class="section-desc">Account and preferences</div></div>
@@ -1094,7 +1070,6 @@ function renderSettings() {
           <div class="avatar" style="width:56px;height:56px;font-size:20px">${APP.user?.initials||'?'}</div>
           <div>
             <div class="fw-600" style="font-size:16px">${APP.user?.name||'User'}</div>
-            <div class="text-muted text-sm">${APP.user?.email||''}</div>
             <div class="mt-1"><span class="badge ${APP.role==='manager'?'badge-purple':'badge-blue'}">${APP.role==='manager'?'Manager':'Coordinator'}</span></div>
           </div>
         </div>
@@ -1102,10 +1077,6 @@ function renderSettings() {
           <div class="form-group">
             <label class="form-label">Full Name</label>
             <input class="form-input" value="${APP.user?.name||''}" id="s-name">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Email</label>
-            <input class="form-input" value="${APP.user?.email||''}" id="s-email">
           </div>
         </div>
         <button class="btn btn-primary btn-sm" onclick="saveProfile()">Save Changes</button>
@@ -1145,6 +1116,57 @@ function renderSettings() {
       </div>
     </div>
 
+    ${isManager ? `
+    <div class="card mb-6">
+      <div class="card-header"><span class="card-title">Team Management</span></div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Full Name</label>
+            <input class="form-input" id="tm-name" placeholder="e.g. Ananya Gupta">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Username</label>
+            <input class="form-input" id="tm-username" placeholder="e.g. ananya">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Password</label>
+            <input class="form-input" id="tm-password" type="password" placeholder="Set a temporary password">
+          </div>
+          <div class="form-group" style="align-self:flex-end">
+            <button class="btn btn-primary" onclick="addCoordinator()">Add Coordinator</button>
+          </div>
+        </div>
+
+        <div class="mt-6">
+          <div class="fw-600 mb-3" style="font-size:14px">Coordinators</div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Name</th><th>Username</th><th>Actions</th></tr></thead>
+              <tbody>
+                ${(() => {
+                  const coords = getUsersByRole('coordinator');
+                  if (!coords.length) {
+                    return `<tr><td colspan="3"><div class="text-muted text-sm">No coordinators yet.</div></td></tr>`;
+                  }
+                  return coords.map(c => `
+                    <tr>
+                      <td>${c.name}</td>
+                      <td class="mono text-sm">${c.username}</td>
+                      <td><button class="btn btn-ghost btn-sm" onclick="removeCoordinator('${c.id}')">Remove</button></td>
+                    </tr>
+                  `).join('');
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
     <div class="card">
       <div class="card-header"><span class="card-title">Account</span></div>
       <div class="card-body">
@@ -1154,15 +1176,61 @@ function renderSettings() {
   `;
 
   window.saveProfile = () => {
-    const name = document.getElementById('s-name')?.value;
-    const email = document.getElementById('s-email')?.value;
-    if (APP.user) { APP.user.name = name; APP.user.email = email; }
-    localStorage.setItem('cp-user', JSON.stringify(APP.user));
+    const name = document.getElementById('s-name')?.value?.trim();
+    if (!name) { alert('Please enter a name'); return; }
+    if (!APP.user) return;
+    const users = loadUsers();
+    const idx = users.findIndex(u => u.id === APP.user.id);
+    if (idx !== -1) {
+      users[idx].name = name;
+      saveUsers(users);
+    }
+    APP.user.name = name;
+    APP.user.initials = getInitials(name);
+    sessionStorage.setItem('cp-session', JSON.stringify({
+      userId: APP.user.id,
+      role: APP.role,
+      name: APP.user.name,
+      initials: APP.user.initials
+    }));
     alert('Profile saved!');
   };
   window.toggleThemeToggle = (el) => {
     el.classList.toggle('on');
     setTheme(el.classList.contains('on') ? 'dark' : 'light');
+  };
+  window.addCoordinator = async () => {
+    const name = document.getElementById('tm-name')?.value?.trim();
+    const username = normalizeUsername(document.getElementById('tm-username')?.value);
+    const password = document.getElementById('tm-password')?.value || '';
+    if (!name || !username || !password) {
+      alert('Please fill in all coordinator fields.');
+      return;
+    }
+    const users = loadUsers();
+    if (users.some(u => u.username === username)) {
+      alert('That username is already in use.');
+      return;
+    }
+    const passwordHash = await hashPassword(password);
+    users.push({
+      id: crypto.randomUUID(),
+      name,
+      username,
+      passwordHash,
+      role: 'coordinator',
+      mustChangePassword: false,
+      createdAt: new Date().toISOString()
+    });
+    saveUsers(users);
+    renderSettings();
+  };
+  window.removeCoordinator = (id) => {
+    if (!confirm('Remove this coordinator?')) return;
+    const users = loadUsers();
+    const next = users.filter(u => u.id !== id);
+    saveUsers(next);
+    renderSettings();
   };
 }
 
@@ -1188,56 +1256,141 @@ document.addEventListener('click', e => {
 
 // ── LOGIN ──
 function handleLogin() {
-  const role = APP.role;
-  const userId = document.getElementById('user-select')?.value;
-  if (!userId) return;
-
-  const users = role === 'manager' ? DATA.managers : DATA.coordinators;
-  const user = users.find(u => u.id === userId);
-  if (!user) return;
-
-  APP.user = user;
-  localStorage.setItem('cp-user', JSON.stringify(user));
-  localStorage.setItem('cp-role', role);
-
-  document.getElementById('login-page').style.display = 'none';
-  document.getElementById('app').style.display = 'flex';
-
-  initApp();
+  if (APP.passwordChangeUserId) {
+    return handlePasswordChange();
+  }
+  return handleSignIn();
 }
 
 function logout() {
-  localStorage.removeItem('cp-role');
-  localStorage.removeItem('cp-user');
-  APP.role = null; APP.user = null;
+  sessionStorage.removeItem('cp-session');
+  APP.role = null; APP.user = null; APP.passwordChangeUserId = null;
   document.getElementById('app').style.display = 'none';
   document.getElementById('login-page').style.display = 'flex';
   showLoginStep1();
 }
 
 function showLoginStep1() {
+  APP.passwordChangeUserId = null;
   document.getElementById('login-step2').style.display = 'none';
   document.getElementById('login-step1').style.display = 'block';
-  document.getElementById('login-proceed-btn').style.display = 'none';
+  document.getElementById('login-proceed-btn').style.display = 'block';
+  document.getElementById('login-proceed-btn').textContent = 'Sign In';
+  document.getElementById('login-username').value = '';
+  document.getElementById('login-password').value = '';
+  setLoginError('');
 }
 
-function selectRole(role, el) {
-  APP.role = role;
-  document.querySelectorAll('.role-card').forEach(c => c.classList.remove('selected'));
-  el.classList.add('selected');
-  // Show user select
+function setLoginError(message) {
+  const el = document.getElementById('login-error');
+  if (!el) return;
+  el.textContent = message || '';
+  el.style.display = message ? 'block' : 'none';
+}
+
+function hydrateSession() {
+  const session = JSON.parse(sessionStorage.getItem('cp-session') || 'null');
+  if (!session) {
+    APP.role = null;
+    APP.user = null;
+    return;
+  }
+  APP.role = session.role;
+  APP.user = {
+    id: session.userId,
+    name: session.name,
+    initials: session.initials,
+    role: session.role
+  };
+}
+
+async function handleSignIn() {
+  const username = normalizeUsername(document.getElementById('login-username')?.value);
+  const password = document.getElementById('login-password')?.value || '';
+  if (!username || !password) {
+    setLoginError('Enter both username and password.');
+    return;
+  }
+
+  const users = loadUsers();
+  const user = users.find(u => u.username === username);
+  if (!user) {
+    setLoginError('Invalid username or password.');
+    return;
+  }
+  const passwordHash = await hashPassword(password);
+  if (passwordHash !== user.passwordHash) {
+    setLoginError('Invalid username or password.');
+    return;
+  }
+  if (user.mustChangePassword) {
+    return showPasswordChange(user);
+  }
+  createSession(user);
+}
+
+function showPasswordChange(user) {
+  APP.passwordChangeUserId = user.id;
+  document.getElementById('login-step1').style.display = 'none';
   const step2 = document.getElementById('login-step2');
-  const users = role === 'manager' ? DATA.managers : DATA.coordinators;
   step2.innerHTML = `
     <div class="form-group">
-      <label class="form-label">Select your name</label>
-      <select class="form-select" id="user-select">
-        ${users.map(u => `<option value="${u.id}">${u.name}</option>`).join('')}
-      </select>
+      <label class="form-label">Set New Password</label>
+      <input class="form-input" id="new-password" type="password" placeholder="At least 8 characters">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Confirm New Password</label>
+      <input class="form-input" id="confirm-password" type="password" placeholder="Re-enter password">
     </div>
   `;
   step2.style.display = 'block';
-  document.getElementById('login-proceed-btn').style.display = 'block';
+  document.getElementById('login-proceed-btn').textContent = 'Save Password';
+  setLoginError('');
+}
+
+async function handlePasswordChange() {
+  const newPassword = document.getElementById('new-password')?.value || '';
+  const confirmPassword = document.getElementById('confirm-password')?.value || '';
+  if (newPassword.length < 8) {
+    setLoginError('New password must be at least 8 characters.');
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    setLoginError('Passwords do not match.');
+    return;
+  }
+  const users = loadUsers();
+  const idx = users.findIndex(u => u.id === APP.passwordChangeUserId);
+  if (idx === -1) {
+    setLoginError('User not found. Please sign in again.');
+    showLoginStep1();
+    return;
+  }
+  users[idx].passwordHash = await hashPassword(newPassword);
+  users[idx].mustChangePassword = false;
+  saveUsers(users);
+  APP.passwordChangeUserId = null;
+  createSession(users[idx]);
+}
+
+function createSession(user) {
+  const session = {
+    userId: user.id,
+    role: user.role,
+    name: user.name,
+    initials: getInitials(user.name)
+  };
+  sessionStorage.setItem('cp-session', JSON.stringify(session));
+  APP.role = user.role;
+  APP.user = {
+    id: user.id,
+    name: user.name,
+    initials: session.initials,
+    role: user.role
+  };
+  document.getElementById('login-page').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  initApp();
 }
 
 // ── INIT APP ──
@@ -1266,25 +1419,30 @@ function initApp() {
 
 // ── STARTUP ──
 document.addEventListener('DOMContentLoaded', () => {
-  setTheme(APP.theme);
+  (async () => {
+    setTheme(APP.theme);
+    await ensureSeedManagers();
+    APP.users = loadUsers();
+    hydrateSession();
 
-  if (APP.role && APP.user) {
-    document.getElementById('login-page').style.display = 'none';
-    document.getElementById('app').style.display = 'flex';
-    initApp();
-  } else {
-    document.getElementById('login-page').style.display = 'flex';
-    document.getElementById('app').style.display = 'none';
-    showLoginStep1();
-  }
-
-  // Click outside notif panel
-  document.addEventListener('click', e => {
-    if (APP.notifPanelOpen &&
-        !document.getElementById('notif-panel').contains(e.target) &&
-        !document.getElementById('notif-btn').contains(e.target)) {
-      APP.notifPanelOpen = false;
-      document.getElementById('notif-panel').classList.remove('open');
+    if (APP.role && APP.user) {
+      document.getElementById('login-page').style.display = 'none';
+      document.getElementById('app').style.display = 'flex';
+      initApp();
+    } else {
+      document.getElementById('login-page').style.display = 'flex';
+      document.getElementById('app').style.display = 'none';
+      showLoginStep1();
     }
-  });
+
+    // Click outside notif panel
+    document.addEventListener('click', e => {
+      if (APP.notifPanelOpen &&
+          !document.getElementById('notif-panel').contains(e.target) &&
+          !document.getElementById('notif-btn').contains(e.target)) {
+        APP.notifPanelOpen = false;
+        document.getElementById('notif-panel').classList.remove('open');
+      }
+    });
+  })();
 });
