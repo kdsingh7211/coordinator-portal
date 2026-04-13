@@ -1097,7 +1097,7 @@ function renderPoc() {
     const input = document.getElementById('poc-new-category');
     const value = input?.value?.trim();
     if (!value) {
-      alert('Please enter a category name (at least 1 character).');
+      alert('Please enter a category name.');
       return;
     }
     const exists = DATA.pocCategories.some(c => c.toLowerCase() === value.toLowerCase());
