@@ -2736,9 +2736,13 @@ async function handleSignIn() {
   }
 
   const users = loadUsers();
-  const passwordHash = await hashPassword(password);
-  const user = users.find(u => u.username === username && u.passwordHash === passwordHash);
+  const user = users.find(u => u.username === username);
   if (!user) {
+    setLoginError('Invalid username or password.');
+    return;
+  }
+  const passwordHash = await hashPassword(password);
+  if (user.passwordHash !== passwordHash) {
     setLoginError('Invalid username or password.');
     return;
   }
