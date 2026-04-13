@@ -134,6 +134,7 @@ function getCoordinatorStats(userId) {
 }
 
 async function ensureSeedManagers() {
+  console.log('SEEDING: starting seed function');
   const existing = loadUsers();
   const hasValidManagers = existing.some(u =>
     u.role === 'manager' &&
@@ -144,14 +145,17 @@ async function ensureSeedManagers() {
     APP.users = existing;
     return;
   }
-  const passwordHash = await hashPassword(TEMP_PASSWORD);
+  console.log('SEEDING: hashing password...');
+  const hash = await hashPassword(TEMP_PASSWORD);
+  console.log('SEEDING: hash result =', hash);
+  console.log('SEEDING: hash length =', hash.length);
   const now = new Date().toISOString();
   const seedManagers = [
     {
       id: crypto.randomUUID(),
       name: 'Chetan Jangid',
       username: 'chetan',
-      passwordHash,
+      passwordHash: hash,
       role: 'manager',
       mustChangePassword: true,
       createdAt: now
@@ -160,7 +164,7 @@ async function ensureSeedManagers() {
       id: crypto.randomUUID(),
       name: 'Karandeep Singh',
       username: 'karandeep',
-      passwordHash,
+      passwordHash: hash,
       role: 'manager',
       mustChangePassword: true,
       createdAt: now
@@ -168,6 +172,8 @@ async function ensureSeedManagers() {
   ];
   const nonManagerUsers = existing.filter(u => u.role !== 'manager');
   saveUsers([...nonManagerUsers, ...seedManagers]);
+  const saved = JSON.parse(localStorage.getItem('cp-users') || '[]');
+  console.log('SEEDING: saved users in localStorage =', JSON.stringify(saved, null, 2));
 }
 function calcTaskProgress(task) {
   const subs = task.subtasks;
@@ -2730,19 +2736,31 @@ function hydrateSession() {
 async function handleSignIn() {
   const username = normalizeUsername(document.getElementById('login-username')?.value);
   const password = document.getElementById('login-password')?.value || '';
+  const enteredUsername = username;
+  console.log('LOGIN ATTEMPT: username =', enteredUsername);
   if (!username || !password) {
     setLoginError('Enter both username and password.');
     return;
   }
 
   const users = loadUsers();
+  console.log('LOGIN: all users in localStorage =', JSON.stringify(users, null, 2));
   const user = users.find(u => u.username === username);
+  console.log('LOGIN RESULT: user found =', user ? user.name : 'NOT FOUND');
   if (!user) {
     setLoginError('Invalid username or password.');
     return;
   }
-  const passwordHash = await hashPassword(password);
-  if (user.passwordHash !== passwordHash) {
+  console.log('LOGIN: hashing entered password...');
+  const hash = await hashPassword(password);
+  console.log('LOGIN: entered password hash =', hash);
+  console.log('LOGIN: hash length =', hash.length);
+  users.forEach(u => {
+    console.log('LOGIN: checking user =', u.username);
+    console.log('LOGIN: stored hash =', u.passwordHash);
+    console.log('LOGIN: hashes match =', u.passwordHash === hash);
+  });
+  if (user.passwordHash !== hash) {
     setLoginError('Invalid username or password.');
     return;
   }
@@ -2842,6 +2860,7 @@ function initApp() {
 
 // ── STARTUP ──
 document.addEventListener('DOMContentLoaded', async () => {
+  console.log('APP INIT START');
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
     loginForm.addEventListener('submit', async (event) => {
