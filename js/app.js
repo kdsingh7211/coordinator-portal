@@ -13,6 +13,9 @@ const APP = {
   notifPanelOpen: false,
   sidebarCollapsed: localStorage.getItem('cp-sidebar-collapsed') === 'true',
   editingResourceId: null,
+  trackDbViewMode: 'all',
+  trackDbStatusFilter: 'all',
+  trackDbExpandedCoordinators: {},
 };
 
 // ── SEED DATA ──
@@ -22,6 +25,7 @@ const DATA = {
   pocCategories: ['Incentive Partner', 'Investor', 'Mentor', 'Corporate'],
   tasks: [],
   pocs: [],
+  dbCompanies: [],
   resources: [
     { id: 'r1', name: 'Cold Email Template', desc: 'Standard outreach email for incubators and startups', type: 'Email Template', icon: '📧', category: 'Templates', url: '#' },
     { id: 'r2', name: 'Follow-up Email #1', desc: 'First follow-up, send 3 days after initial email', type: 'Email Template', icon: '📨', category: 'Templates', url: '#' },
@@ -36,6 +40,8 @@ const DATA = {
   ],
   notifications: []
 };
+
+const DB_STATUS_OPTIONS = ['Mail Sent', 'Replied', 'Denied', 'Accepted'];
 
 // ── HELPERS ──
 async function hashPassword(password) {
@@ -176,6 +182,167 @@ function getVisiblePocs() {
   return DATA.pocs.filter(p => p.createdByRole === 'coordinator' && p.createdBy === userId);
 }
 
+function normalizeCompanyName(name) {
+  return String(name || '').trim().toLowerCase();
+}
+
+function getTrackDbEntriesForCurrentUser() {
+  if (!APP.user) return [];
+  if (APP.role === 'manager') return DATA.dbCompanies;
+  return DATA.dbCompanies.filter(entry => entry.coordinatorId === APP.user.id);
+}
+
+function findDbCompanyEntry(companyName, coordinatorId) {
+  const key = normalizeCompanyName(companyName);
+  return DATA.dbCompanies.find(entry => (
+    entry.coordinatorId === coordinatorId &&
+    normalizeCompanyName(entry.companyName) === key
+  ));
+}
+
+function ensureUniqueContacts(existingContacts, nextContacts) {
+  const merged = [...(existingContacts || [])];
+  const existingKeys = new Set(merged.map(c => `${String(c.name || '').trim().toLowerCase()}|${String(c.email || '').trim().toLowerCase()}`));
+  (nextContacts || []).forEach(contact => {
+    const name = String(contact.name || '').trim();
+    const email = String(contact.email || '').trim();
+    const key = `${name.toLowerCase()}|${email.toLowerCase()}`;
+    if (!name || !email || existingKeys.has(key)) return;
+    existingKeys.add(key);
+    merged.push({ name, email, company: String(contact.company || '').trim() });
+  });
+  return merged;
+}
+
+function upsertDbCompanyEntries(contacts, { coordinatorId, coordinatorName, sourceTaskId = '' } = {}) {
+  if (!coordinatorId || !Array.isArray(contacts) || !contacts.length) return 0;
+  let touched = 0;
+  contacts.forEach(contact => {
+    const companyName = String(contact.company || '').trim();
+    if (!companyName) return;
+    const existing = findDbCompanyEntry(companyName, coordinatorId);
+    if (existing) {
+      existing.contacts = ensureUniqueContacts(existing.contacts, [contact]);
+      if (!existing.sourceTaskId && sourceTaskId) existing.sourceTaskId = sourceTaskId;
+      existing.updatedAt = new Date().toISOString();
+      touched += 1;
+      return;
+    }
+    DATA.dbCompanies.unshift({
+      id: createId('db-company'),
+      companyName,
+      status: 'Mail Sent',
+      comment: '',
+      coordinatorId,
+      coordinatorName: coordinatorName || getCoordinator(coordinatorId).name || 'Unknown',
+      sourceTaskId: sourceTaskId || '',
+      contacts: ensureUniqueContacts([], [contact]),
+      pocId: '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    touched += 1;
+  });
+  return touched;
+}
+
+function parseCsvTextToRows(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+  const input = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (ch === '"') {
+      if (inQuotes && input[i + 1] === '"') {
+        cell += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === ',' && !inQuotes) {
+      row.push(cell);
+      cell = '';
+      continue;
+    }
+    if (ch === '\n' && !inQuotes) {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+      continue;
+    }
+    cell += ch;
+  }
+  row.push(cell);
+  if (row.length > 1 || row[0].trim()) rows.push(row);
+  return rows;
+}
+
+function parseDbCsv(text) {
+  const rows = parseCsvTextToRows(String(text || '').replace(/^\uFEFF/, ''));
+  if (!rows.length) return { contacts: [], error: 'CSV is empty.' };
+  const header = rows[0].map(h => String(h || '').trim().toLowerCase());
+  const idxName = header.indexOf('name');
+  const idxEmail = header.indexOf('email');
+  const idxCompany = header.indexOf('company');
+  if (idxName === -1 || idxEmail === -1 || idxCompany === -1) {
+    return { contacts: [], error: 'CSV must include exactly these columns: Name, Email, Company.' };
+  }
+  const contacts = [];
+  for (let i = 1; i < rows.length; i += 1) {
+    const source = rows[i];
+    const name = String(source[idxName] || '').trim();
+    const email = String(source[idxEmail] || '').trim();
+    const company = String(source[idxCompany] || '').trim();
+    const isEmptyRow = !name && !email && !company;
+    if (isEmptyRow) continue;
+    if (!name || !email || !company) {
+      return { contacts: [], error: `Row ${i + 1}: Name, Email, and Company are all required.` };
+    }
+    contacts.push({ name, email, company });
+  }
+  if (!contacts.length) return { contacts: [], error: 'CSV has no data rows.' };
+  return { contacts, error: '' };
+}
+
+async function importDbCsvFile(file, { coordinatorId, coordinatorName, sourceTaskId = '' } = {}) {
+  if (!file) {
+    alert('Please choose a CSV file.');
+    return false;
+  }
+  const isCsv = file.name?.toLowerCase().endsWith('.csv') || file.type === 'text/csv';
+  if (!isCsv) {
+    alert('Please upload a valid CSV file.');
+    return false;
+  }
+  let text = '';
+  try {
+    text = await file.text();
+  } catch {
+    alert('Unable to read the selected file.');
+    return false;
+  }
+  const { contacts, error } = parseDbCsv(text);
+  if (error) {
+    alert(error);
+    return false;
+  }
+  const touched = upsertDbCompanyEntries(contacts, { coordinatorId, coordinatorName, sourceTaskId });
+  if (!touched) {
+    alert('No valid company entries found in this CSV.');
+    return false;
+  }
+  return true;
+}
+
+function hasDbUploadForTask(taskId, coordinatorId) {
+  return DATA.dbCompanies.some(entry => entry.sourceTaskId === taskId && entry.coordinatorId === coordinatorId);
+}
+
 function statusBadge(status) {
   const map = { 'Done': 'green', 'In Progress': 'blue', 'Not Started': 'gray' };
   return `<span class="badge badge-${map[status] || 'gray'}">${status}</span>`;
@@ -240,6 +407,7 @@ function navigate(page, extra) {
     timeline: ['Timeline', 'Project timeline view'],
     resources: ['Resources', 'Templates, docs, and links'],
     poc: ['POC', 'Point of contact details'],
+    trackdb: ['Track DB', 'Track uploaded database companies'],
     notifications: ['Notifications', 'Updates and alerts'],
     performance: ['Performance', 'Team performance metrics'],
     settings: ['Settings', 'Preferences and account'],
@@ -256,6 +424,7 @@ function navigate(page, extra) {
     timeline: renderTimeline,
     resources: renderResources,
     poc: renderPoc,
+    trackdb: renderTrackDb,
     notifications: renderNotifications,
     performance: renderPerformance,
     settings: renderSettings,
@@ -564,14 +733,20 @@ function openTaskDetail(taskId) {
   const task = getTask(taskId);
   if (!task) return;
   const isManager = APP.role === 'manager';
+  const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user?.id;
+  const canUpdateStatus = isManager || isAssignedCoordinator;
   const coord = getCoordinator(task.assignedTo);
   const p = calcTaskProgress(task);
+  const dbUploads = task.dbRequired && APP.user
+    ? DATA.dbCompanies.filter(entry => entry.sourceTaskId === task.id && entry.coordinatorId === APP.user.id)
+    : [];
 
   const modal = document.getElementById('task-detail-modal');
   document.getElementById('task-detail-body').innerHTML = `
     <div class="d-flex items-center gap-3 mb-4" style="flex-wrap:wrap">
       ${catBadge(task.category)}
       ${statusBadge(task.status)}
+      ${task.dbRequired ? '<span class="badge badge-purple">DB Required</span>' : ''}
       <span class="mono text-sm text-muted">${p}% complete</span>
     </div>
 
@@ -596,13 +771,41 @@ function openTaskDetail(taskId) {
           </div>
         </div>
       </div>
-      ${isManager ? `<div class="meta-item">
+      <div class="meta-item">
+        <div class="meta-key">DB Upload</div>
+        <div class="meta-val mt-2">${task.dbRequired ? 'Required' : 'Not Required'}</div>
+      </div>
+      ${canUpdateStatus ? `<div class="meta-item">
         <div class="meta-key">Update Status</div>
-        <select class="form-select mt-2" onchange="updateTaskStatus('${task.id}', this.value)">
+        <select class="form-select mt-2" onchange="updateTaskStatus('${task.id}', this.value, this)">
           ${['Not Started','In Progress','Done'].map(s => `<option ${task.status===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>` : ''}
     </div>
+
+    ${isAssignedCoordinator && task.dbRequired ? `
+      <hr class="divider">
+      <div class="fw-600 mb-4" style="font-size:14px">🗂️ DB Upload Required</div>
+      <div class="card" style="margin-bottom:var(--sp-4)">
+        <div class="card-body">
+          <div class="text-sm text-muted mb-3">
+            Upload CSV with columns: Name, Email, Company before marking this task as Done.
+          </div>
+          <div class="text-sm mb-3">
+            Uploaded companies for this task: <span class="fw-600">${dbUploads.length}</span>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">CSV File</label>
+              <input type="file" class="form-input" id="task-db-file-${task.id}" accept=".csv,text/csv">
+            </div>
+            <div class="form-group" style="align-self:flex-end">
+              <button class="btn btn-primary" onclick="uploadTaskDbCsv('${task.id}')">Upload DB CSV</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    ` : ''}
 
     <hr class="divider">
     <div class="fw-600 mb-4" style="font-size:14px">📊 Sub-tasks & Metrics</div>
@@ -682,9 +885,44 @@ function updateSubtask(taskId, subId, val) {
   if (sub) sub.value = parseFloat(val) || 0;
 }
 
-function updateTaskStatus(taskId, status) {
+function updateTaskStatus(taskId, status, selectEl) {
   const task = getTask(taskId);
-  if (task) { task.status = status; }
+  if (!task || !APP.user) return;
+  const prevStatus = task.status;
+  const isManager = APP.role === 'manager';
+  const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user.id;
+  if (!isManager && !isAssignedCoordinator) {
+    if (selectEl) selectEl.value = prevStatus;
+    return;
+  }
+  if (status === 'Done' && isAssignedCoordinator && task.dbRequired && !hasDbUploadForTask(task.id, APP.user.id)) {
+    alert('This task requires DB upload. Please upload a CSV (Name, Email, Company) before marking it Done.');
+    if (selectEl) selectEl.value = prevStatus;
+    return;
+  }
+  task.status = status;
+  renderTasks(window._currentTaskFilter || 'all');
+  renderDashboard();
+}
+
+async function uploadTaskDbCsv(taskId) {
+  const task = getTask(taskId);
+  if (!task || !APP.user) return;
+  if (APP.role !== 'coordinator' || task.assignedTo !== APP.user.id) {
+    alert('Only the assigned coordinator can upload DB for this task.');
+    return;
+  }
+  const fileInput = document.getElementById(`task-db-file-${task.id}`);
+  const file = fileInput?.files?.[0];
+  const ok = await importDbCsvFile(file, {
+    coordinatorId: APP.user.id,
+    coordinatorName: APP.user.name,
+    sourceTaskId: task.id
+  });
+  if (!ok) return;
+  if (fileInput) fileInput.value = '';
+  alert('DB CSV uploaded successfully.');
+  openTaskDetail(task.id);
 }
 
 function addComment(taskId) {
@@ -828,6 +1066,12 @@ function openNewTaskModal() {
         <input type="date" class="form-input" id="nt-deadline">
       </div>
     </div>
+    <div class="form-group">
+      <label class="d-flex items-center gap-2" style="font-size:13px">
+        <input type="checkbox" id="nt-db-required">
+        <span>DB required (coordinator must upload CSV: Name, Email, Company before marking Done)</span>
+      </label>
+    </div>
   `;
   openModal('new-task-modal');
 }
@@ -841,12 +1085,13 @@ function saveNewTask() {
     return;
   }
   const newTask = {
-    id: 't' + Date.now(),
+    id: createId('task'),
     name,
     category: document.getElementById('nt-cat')?.value,
     assignedTo,
     status: document.getElementById('nt-status')?.value || 'Not Started',
     deadline: document.getElementById('nt-deadline')?.value,
+    dbRequired: !!document.getElementById('nt-db-required')?.checked,
     comments: [],
     subtasks: [],
     timeline: [{ date: new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short'}), title: 'Task Created', body: 'Task has been created and assigned', done: true }]
@@ -902,6 +1147,12 @@ function openEditTaskModal(taskId) {
         <input type="date" class="form-input" id="nt-deadline" value="${task.deadline||''}">
       </div>
     </div>
+    <div class="form-group">
+      <label class="d-flex items-center gap-2" style="font-size:13px">
+        <input type="checkbox" id="nt-db-required" ${task.dbRequired ? 'checked' : ''}>
+        <span>DB required (coordinator must upload CSV: Name, Email, Company before marking Done)</span>
+      </label>
+    </div>
   `;
   document.getElementById('save-new-task-btn').onclick = () => {
     task.name = document.getElementById('nt-name')?.value?.trim() || task.name;
@@ -909,6 +1160,7 @@ function openEditTaskModal(taskId) {
     task.assignedTo = document.getElementById('nt-assign')?.value;
     task.status = document.getElementById('nt-status')?.value;
     task.deadline = document.getElementById('nt-deadline')?.value;
+    task.dbRequired = !!document.getElementById('nt-db-required')?.checked;
     closeModal('new-task-modal');
     renderTasks();
   };
@@ -1369,6 +1621,260 @@ function renderPoc() {
     });
     renderPoc();
   };
+}
+
+function canEditDbEntry(entry) {
+  if (!APP.user || !entry) return false;
+  if (APP.role === 'manager') return true;
+  return APP.role === 'coordinator' && entry.coordinatorId === APP.user.id;
+}
+
+function dbStatusBadgeClass(status) {
+  if (status === 'Accepted') return 'badge-green';
+  if (status === 'Denied') return 'badge-red';
+  if (status === 'Replied') return 'badge-blue';
+  if (status === 'Mail Sent') return 'badge-yellow';
+  return 'badge-gray';
+}
+
+function getTrackDbFilteredEntries() {
+  const base = getTrackDbEntriesForCurrentUser();
+  if (APP.trackDbStatusFilter === 'all') return base;
+  return base.filter(entry => entry.status === APP.trackDbStatusFilter);
+}
+
+function renderTrackDbTableRows(entries, { showCoordinator = false } = {}) {
+  const isManager = APP.role === 'manager';
+  const colspan = showCoordinator ? 6 : 5;
+  if (!entries.length) {
+    return `<tr><td colspan="${colspan}"><div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">No companies found</div></div></td></tr>`;
+  }
+  return entries.map(entry => {
+    const editable = canEditDbEntry(entry);
+    const contactCount = Array.isArray(entry.contacts) ? entry.contacts.length : 0;
+    return `
+      <tr>
+        <td class="td-main">
+          ${escapeHtml(entry.companyName)}
+          <div class="text-sm text-muted mt-1">${contactCount} contact${contactCount !== 1 ? 's' : ''}</div>
+        </td>
+        ${showCoordinator ? `<td>${escapeHtml(entry.coordinatorName || getCoordinator(entry.coordinatorId).name || 'Unknown')}</td>` : ''}
+        <td>
+          <select class="form-select" ${editable ? '' : 'disabled'} onchange="updateDbCompanyStatus('${entry.id}', this.value)">
+            ${DB_STATUS_OPTIONS.map(status => `<option ${entry.status === status ? 'selected' : ''}>${status}</option>`).join('')}
+          </select>
+          <div class="mt-1"><span class="badge ${dbStatusBadgeClass(entry.status)}">${escapeHtml(entry.status || '—')}</span></div>
+        </td>
+        <td>
+          <textarea class="form-input" rows="2" ${editable ? '' : 'disabled'} onblur="updateDbCompanyComment('${entry.id}', this.value)">${escapeHtml(entry.comment || '')}</textarea>
+        </td>
+        <td>${entry.sourceTaskId ? '<span class="badge badge-blue">Task</span>' : '<span class="badge badge-gray">Direct</span>'}</td>
+        <td>${entry.pocId ? '<span class="badge badge-green">Linked</span>' : '<span class="badge badge-gray">—</span>'}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderTrackDb() {
+  const el = document.getElementById('page-trackdb');
+  if (!el) return;
+  const isManager = APP.role === 'manager';
+  const entries = getTrackDbFilteredEntries();
+  const coordinators = getUsersByRole('coordinator');
+  const grouped = entries.reduce((acc, entry) => {
+    const key = entry.coordinatorId || 'unknown';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(entry);
+    return acc;
+  }, {});
+  const groupedCoordinatorIds = Object.keys(grouped);
+
+  el.innerHTML = `
+    <div class="section-header">
+      <div>
+        <div class="section-title">Track DB</div>
+        <div class="section-desc">Track unique companies from uploaded CSV data</div>
+      </div>
+      <div class="section-actions">
+        <select class="form-select" style="height:34px;width:auto" onchange="setTrackDbStatusFilter(this.value)">
+          <option value="all" ${APP.trackDbStatusFilter === 'all' ? 'selected' : ''}>All Statuses</option>
+          ${DB_STATUS_OPTIONS.map(status => `<option value="${escapeHtml(status)}" ${APP.trackDbStatusFilter === status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div class="card mb-6">
+      <div class="card-header"><span class="card-title">Upload CSV</span></div>
+      <div class="card-body">
+        <div class="text-sm text-muted mb-4">CSV format: <strong>Name, Email, Company</strong>. Duplicate companies are merged per coordinator.</div>
+        <div class="form-row">
+          ${isManager ? `
+          <div class="form-group">
+            <label class="form-label">Coordinator</label>
+            <select class="form-select" id="trackdb-upload-coordinator">
+              <option value="">Select coordinator</option>
+              ${coordinators.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+            </select>
+          </div>` : ''}
+          <div class="form-group">
+            <label class="form-label">CSV File</label>
+            <input type="file" class="form-input" id="trackdb-upload-file" accept=".csv,text/csv">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="uploadTrackDbCsv()">Upload CSV</button>
+      </div>
+    </div>
+
+    ${isManager ? `
+      <div class="tabs" style="margin-bottom:var(--sp-4)">
+        <div class="tab ${APP.trackDbViewMode === 'all' ? 'active' : ''}" onclick="setTrackDbViewMode('all')">All Companies</div>
+        <div class="tab ${APP.trackDbViewMode === 'grouped' ? 'active' : ''}" onclick="setTrackDbViewMode('grouped')">By Coordinator</div>
+      </div>
+    ` : ''}
+
+    ${!isManager || APP.trackDbViewMode === 'all' ? `
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">${isManager ? 'All Companies' : 'My Companies'}</span>
+          <span class="text-muted text-sm">${entries.length} compan${entries.length === 1 ? 'y' : 'ies'}</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Company</th>
+                ${isManager ? '<th>Coordinator</th>' : ''}
+                <th>Status</th>
+                <th>Comments</th>
+                <th>Source</th>
+                <th>POC</th>
+              </tr>
+            </thead>
+            <tbody>${renderTrackDbTableRows(entries, { showCoordinator: isManager })}</tbody>
+          </table>
+        </div>
+      </div>
+    ` : ''}
+
+    ${isManager && APP.trackDbViewMode === 'grouped' ? `
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Coordinator Uploads</span>
+          <span class="text-muted text-sm">${groupedCoordinatorIds.length} coordinator${groupedCoordinatorIds.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="card-body">
+          ${groupedCoordinatorIds.length ? groupedCoordinatorIds.map(coordinatorId => {
+            const rowEntries = grouped[coordinatorId] || [];
+            const coordinatorName = rowEntries[0]?.coordinatorName || getCoordinator(coordinatorId).name || 'Unknown';
+            const expanded = !!APP.trackDbExpandedCoordinators[coordinatorId];
+            return `
+              <div class="card mb-4" style="overflow:hidden">
+                <button class="btn btn-secondary" style="width:100%;justify-content:space-between" onclick="toggleTrackDbCoordinator('${coordinatorId}')">
+                  <span>${escapeHtml(coordinatorName)}</span>
+                  <span>${rowEntries.length} compan${rowEntries.length === 1 ? 'y' : 'ies'} ${expanded ? '▲' : '▼'}</span>
+                </button>
+                ${expanded ? `
+                  <div class="table-wrap">
+                    <table>
+                      <thead><tr><th>Company</th><th>Status</th><th>Comments</th><th>Source</th><th>POC</th></tr></thead>
+                      <tbody>${renderTrackDbTableRows(rowEntries, { showCoordinator: false })}</tbody>
+                    </table>
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          }).join('') : '<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">No coordinator uploads yet</div></div>'}
+        </div>
+      </div>
+    ` : ''}
+  `;
+}
+
+function setTrackDbStatusFilter(value) {
+  APP.trackDbStatusFilter = value || 'all';
+  renderTrackDb();
+}
+
+function setTrackDbViewMode(mode) {
+  APP.trackDbViewMode = mode === 'grouped' ? 'grouped' : 'all';
+  renderTrackDb();
+}
+
+function toggleTrackDbCoordinator(coordinatorId) {
+  APP.trackDbExpandedCoordinators[coordinatorId] = !APP.trackDbExpandedCoordinators[coordinatorId];
+  renderTrackDb();
+}
+
+async function uploadTrackDbCsv() {
+  if (!APP.user) return;
+  const fileInput = document.getElementById('trackdb-upload-file');
+  const file = fileInput?.files?.[0];
+  let coordinatorId = APP.user.id;
+  let coordinatorName = APP.user.name;
+  if (APP.role === 'manager') {
+    coordinatorId = document.getElementById('trackdb-upload-coordinator')?.value || '';
+    if (!coordinatorId) {
+      alert('Please select a coordinator for this upload.');
+      return;
+    }
+    coordinatorName = getCoordinator(coordinatorId).name || '';
+  }
+  const ok = await importDbCsvFile(file, { coordinatorId, coordinatorName, sourceTaskId: '' });
+  if (!ok) return;
+  if (fileInput) fileInput.value = '';
+  alert('CSV uploaded successfully.');
+  renderTrackDb();
+}
+
+function updateDbCompanyComment(companyId, value) {
+  const entry = DATA.dbCompanies.find(item => item.id === companyId);
+  if (!entry || !canEditDbEntry(entry)) return;
+  entry.comment = String(value || '').trim();
+  entry.updatedAt = new Date().toISOString();
+}
+
+async function promptAndCreatePocForDbCompany(entry) {
+  const defaultContact = Array.isArray(entry.contacts) && entry.contacts.length ? entry.contacts[0] : null;
+  const name = prompt('Enter POC name for this accepted company:', defaultContact?.name || '')?.trim();
+  if (!name) return '';
+  const email = prompt('Enter POC email (optional):', defaultContact?.email || '')?.trim() || '';
+  const contact = prompt('Enter POC contact number (optional):', '')?.trim() || '';
+  const categoryInput = prompt('Enter POC category (optional, default: Corporate):', 'Corporate')?.trim();
+  const category = categoryInput || 'Corporate';
+  const pocId = createId('poc');
+  DATA.pocs.unshift({
+    id: pocId,
+    name,
+    organization: entry.companyName,
+    category,
+    email,
+    contact,
+    createdBy: APP.user?.id || '',
+    createdByName: APP.user?.name || '',
+    createdByRole: APP.role || '',
+    sharedManagerIds: [],
+    createdAt: new Date().toISOString()
+  });
+  return pocId;
+}
+
+async function updateDbCompanyStatus(companyId, status) {
+  const entry = DATA.dbCompanies.find(item => item.id === companyId);
+  if (!entry || !canEditDbEntry(entry)) return;
+  if (!DB_STATUS_OPTIONS.includes(status)) return;
+  const prevStatus = entry.status;
+  if (status === 'Accepted' && !entry.pocId) {
+    const pocId = await promptAndCreatePocForDbCompany(entry);
+    if (!pocId) {
+      alert('POC is required to mark a company as Accepted.');
+      renderTrackDb();
+      return;
+    }
+    entry.pocId = pocId;
+  }
+  entry.status = status;
+  entry.updatedAt = new Date().toISOString();
+  if (prevStatus !== status) renderTrackDb();
 }
 
 // ── NOTIFICATIONS PAGE ──
