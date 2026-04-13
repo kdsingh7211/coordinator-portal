@@ -18,7 +18,9 @@ const APP = {
 const DATA = {
   coordinators: [],
   categories: ['Incubators', 'Startups', 'Email Outreach', 'Database Work', 'Events', 'Research'],
+  pocCategories: ['Incentive Partner', 'Investor', 'Mentor', 'Corporate'],
   tasks: [],
+  pocs: [],
   resources: [
     { id: 'r1', name: 'Cold Email Template', desc: 'Standard outreach email for incubators and startups', type: 'Email Template', icon: '📧', category: 'Templates', url: '#' },
     { id: 'r2', name: 'Follow-up Email #1', desc: 'First follow-up, send 3 days after initial email', type: 'Email Template', icon: '📨', category: 'Templates', url: '#' },
@@ -137,6 +139,27 @@ function getCoordinator(id) {
   return { ...coord, initials: getInitials(coord.name) };
 }
 function getTask(id) { return DATA.tasks.find(t => t.id === id); }
+function escapeHtml(text) {
+  const str = String(text ?? '');
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+function getVisiblePocs() {
+  if (!APP.user) return [];
+  const userId = APP.user.id;
+  if (APP.role === 'manager') {
+    return DATA.pocs.filter(p => (
+      p.createdByRole === 'coordinator' ||
+      p.createdBy === userId ||
+      (Array.isArray(p.sharedManagerIds) && p.sharedManagerIds.includes(userId))
+    ));
+  }
+  return DATA.pocs.filter(p => p.createdByRole === 'coordinator' && p.createdBy === userId);
+}
 
 function statusBadge(status) {
   const map = { 'Done': 'green', 'In Progress': 'blue', 'Not Started': 'gray' };
@@ -201,6 +224,7 @@ function navigate(page, extra) {
     tasks: ['Tasks', 'Manage and track all tasks'],
     timeline: ['Timeline', 'Project timeline view'],
     resources: ['Resources', 'Templates, docs, and links'],
+    poc: ['POC', 'Point of contact details'],
     notifications: ['Notifications', 'Updates and alerts'],
     performance: ['Performance', 'Team performance metrics'],
     settings: ['Settings', 'Preferences and account'],
@@ -216,6 +240,7 @@ function navigate(page, extra) {
     tasks: renderTasks,
     timeline: renderTimeline,
     resources: renderResources,
+    poc: renderPoc,
     notifications: renderNotifications,
     performance: renderPerformance,
     settings: renderSettings,
@@ -933,6 +958,190 @@ function renderResourceCards(resources) {
       <div class="resource-type">${r.type}</div>
     </div>
   `).join('');
+}
+
+// ── POC PAGE ──
+function renderPoc() {
+  const el = document.getElementById('page-poc');
+  const isManager = APP.role === 'manager';
+  const visiblePocs = getVisiblePocs();
+  const otherManagers = getUsersByRole('manager').filter(m => m.id !== APP.user?.id);
+
+  el.innerHTML = `
+    <div class="section-header">
+      <div>
+        <div class="section-title">POC</div>
+        <div class="section-desc">Add and manage your point of contacts</div>
+      </div>
+    </div>
+
+    <div class="card mb-6">
+      <div class="card-header"><span class="card-title">Add New POC</span></div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input class="form-input" id="poc-name" placeholder="e.g. Rohan Sharma">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Organization / Company (if any)</label>
+            <input class="form-input" id="poc-org" placeholder="e.g. ABC Ventures">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Category</label>
+            <select class="form-select" id="poc-category" onchange="togglePocOtherCategory(this.value)">
+              ${DATA.pocCategories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="form-group" id="poc-other-wrap" style="display:none">
+            <label class="form-label">Custom Category</label>
+            <input class="form-input" id="poc-category-other" placeholder="Enter category">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Email (if any)</label>
+            <input class="form-input" id="poc-email" placeholder="e.g. name@company.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Contact Number (if any)</label>
+            <input class="form-input" id="poc-contact" placeholder="e.g. +91 9876543210">
+          </div>
+        </div>
+        ${isManager && otherManagers.length ? `
+        <div class="form-group">
+          <label class="form-label">Visible to Other Managers</label>
+          <div class="d-flex" style="flex-wrap:wrap;gap:var(--sp-4)">
+            ${otherManagers.map(m => `
+              <label class="d-flex items-center gap-2" style="font-size:13px">
+                <input type="checkbox" class="poc-share-manager" value="${m.id}">
+                <span>${escapeHtml(m.name)}</span>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+        ` : ''}
+        <button class="btn btn-primary" onclick="savePocEntry()">Save POC</button>
+      </div>
+    </div>
+
+    ${isManager ? `
+    <div class="card mb-6">
+      <div class="card-header"><span class="card-title">POC Categories</span></div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Add Predefined Category</label>
+            <input class="form-input" id="poc-new-category" placeholder="e.g. Incubator Partner">
+          </div>
+          <div class="form-group" style="align-self:flex-end">
+            <button class="btn btn-secondary" onclick="addPocCategory()">Add Category</button>
+          </div>
+        </div>
+        <div class="d-flex" style="flex-wrap:wrap;gap:var(--sp-2)">
+          ${DATA.pocCategories.map(c => `<span class="badge badge-gray">${escapeHtml(c)}</span>`).join('')}
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">POC List</span>
+        <span class="text-muted text-sm">${visiblePocs.length} item${visiblePocs.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Organization</th>
+              <th>Category</th>
+              <th>Email</th>
+              <th>Contact Number</th>
+              ${isManager ? '<th>Coordinator Name</th><th>Added By</th>' : ''}
+            </tr>
+          </thead>
+          <tbody>
+            ${visiblePocs.length ? visiblePocs.map(p => `
+              <tr>
+                <td class="td-main">${escapeHtml(p.name)}</td>
+                <td>${escapeHtml(p.organization || '—')}</td>
+                <td>${catBadge(escapeHtml(p.category))}</td>
+                <td>${escapeHtml(p.email || '—')}</td>
+                <td>${escapeHtml(p.contact || '—')}</td>
+                ${isManager ? `
+                  <td>${p.createdByRole === 'coordinator' ? escapeHtml(p.createdByName || '—') : '—'}</td>
+                  <td>${escapeHtml(p.createdByName || '—')} <span class="text-muted text-sm">(${p.createdByRole === 'manager' ? 'Manager' : 'Coordinator'})</span></td>
+                ` : ''}
+              </tr>
+            `).join('') : `<tr><td colspan="${isManager ? 7 : 5}"><div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">No POCs yet</div></div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  window.togglePocOtherCategory = (value) => {
+    const wrap = document.getElementById('poc-other-wrap');
+    if (!wrap) return;
+    wrap.style.display = value === 'Other' ? '' : 'none';
+  };
+
+  window.addPocCategory = () => {
+    if (APP.role !== 'manager') return;
+    const input = document.getElementById('poc-new-category');
+    const value = input?.value?.trim();
+    if (!value) {
+      alert('Please enter a category name.');
+      return;
+    }
+    const exists = DATA.pocCategories.some(c => c.toLowerCase() === value.toLowerCase());
+    if (exists) {
+      alert('This category already exists.');
+      return;
+    }
+    DATA.pocCategories.push(value);
+    renderPoc();
+  };
+
+  window.savePocEntry = () => {
+    const name = document.getElementById('poc-name')?.value?.trim();
+    const organization = document.getElementById('poc-org')?.value?.trim() || '';
+    const selectedCategory = document.getElementById('poc-category')?.value || '';
+    const customCategory = document.getElementById('poc-category-other')?.value?.trim() || '';
+    const email = document.getElementById('poc-email')?.value?.trim() || '';
+    const contact = document.getElementById('poc-contact')?.value?.trim() || '';
+    if (!name) {
+      alert('Please enter a name.');
+      return;
+    }
+    const category = selectedCategory === 'Other' ? customCategory : selectedCategory;
+    if (!category) {
+      alert('Please select or enter a category.');
+      return;
+    }
+    const sharedManagerIds = APP.role === 'manager'
+      ? Array.from(document.querySelectorAll('.poc-share-manager:checked')).map(el => el.value)
+      : [];
+    DATA.pocs.unshift({
+      id: 'poc' + Date.now(),
+      name,
+      organization,
+      category,
+      email,
+      contact,
+      createdBy: APP.user?.id || '',
+      createdByName: APP.user?.name || '',
+      createdByRole: APP.role || '',
+      sharedManagerIds,
+      createdAt: new Date().toISOString()
+    });
+    renderPoc();
+  };
 }
 
 // ── NOTIFICATIONS PAGE ──
