@@ -182,6 +182,14 @@ function getVisiblePocs() {
   return DATA.pocs.filter(p => p.createdByRole === 'coordinator' && p.createdBy === userId);
 }
 
+function canManagePocEntry(entry) {
+  if (!APP.user || !entry) return false;
+  if (APP.role === 'manager') {
+    return getVisiblePocs().some(p => p.id === entry.id);
+  }
+  return APP.role === 'coordinator' && entry.createdByRole === 'coordinator' && entry.createdBy === APP.user.id;
+}
+
 function encodeForAttr(value) {
   return encodeURIComponent(String(value ?? ''));
 }
@@ -1477,7 +1485,7 @@ function renderPoc() {
   const el = document.getElementById('page-poc');
   const isManager = APP.role === 'manager';
   const visiblePocs = getVisiblePocs();
-  const tableColspan = isManager ? 7 : 5;
+  const tableColspan = isManager ? 8 : 6;
   const otherManagers = getUsersByRole('manager').filter(m => m.id !== APP.user?.id);
 
   el.innerHTML = `
@@ -1576,10 +1584,14 @@ function renderPoc() {
               <th>Email</th>
               <th>Contact Number</th>
               ${isManager ? '<th>Coordinator</th><th>Added By</th>' : ''}
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            ${visiblePocs.length ? visiblePocs.map(p => `
+            ${visiblePocs.length ? visiblePocs.map(p => {
+              const encodedPocId = encodeForAttr(p.id);
+              const canManage = canManagePocEntry(p);
+              return `
               <tr>
                 <td class="td-main">${escapeHtml(p.name)}</td>
                 <td>${escapeHtml(p.organization || '—')}</td>
@@ -1590,8 +1602,17 @@ function renderPoc() {
                   <td>${p.createdByRole === 'coordinator' ? escapeHtml(p.createdByName || '—') : '—'}</td>
                   <td>${escapeHtml(p.createdByName || '—')} <span class="text-muted text-sm">(${p.createdByRole === 'manager' ? 'Manager' : 'Coordinator'})</span></td>
                 ` : ''}
+                <td>
+                  ${canManage ? `
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-ghost btn-sm" onclick="editPocEntryByEncoded('${encodedPocId}')">✏️ Edit</button>
+                      <button class="btn btn-ghost btn-sm" onclick="deletePocEntryByEncoded('${encodedPocId}')">🗑️ Delete</button>
+                    </div>
+                  ` : '—'}
+                </td>
               </tr>
-            `).join('') : `<tr><td colspan="${tableColspan}"><div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">No POCs yet</div></div></td></tr>`}
+            `;
+            }).join('') : `<tr><td colspan="${tableColspan}"><div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">No POCs yet</div></div></td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1657,6 +1678,48 @@ function renderPoc() {
   };
 }
 
+function editPocEntry(pocId) {
+  const entry = DATA.pocs.find(item => item.id === pocId);
+  if (!entry || !canManagePocEntry(entry)) return;
+  const name = prompt('Edit POC name:', entry.name || '')?.trim();
+  if (!name) return;
+  const organization = prompt('Edit organization/company (optional):', entry.organization || '');
+  if (organization === null) return;
+  const category = prompt('Edit category:', entry.category || '')?.trim();
+  if (!category) {
+    alert('Category is required.');
+    return;
+  }
+  const email = prompt('Edit email (optional):', entry.email || '');
+  if (email === null) return;
+  const contact = prompt('Edit contact number (optional):', entry.contact || '');
+  if (contact === null) return;
+  entry.name = name;
+  entry.organization = String(organization || '').trim();
+  entry.category = category;
+  entry.email = String(email || '').trim();
+  entry.contact = String(contact || '').trim();
+  renderPoc();
+}
+
+function editPocEntryByEncoded(encodedPocId) {
+  editPocEntry(decodeFromAttr(encodedPocId));
+}
+
+function deletePocEntry(pocId) {
+  const idx = DATA.pocs.findIndex(item => item.id === pocId);
+  if (idx === -1) return;
+  const entry = DATA.pocs[idx];
+  if (!canManagePocEntry(entry)) return;
+  if (!confirm('Delete this POC?')) return;
+  DATA.pocs.splice(idx, 1);
+  renderPoc();
+}
+
+function deletePocEntryByEncoded(encodedPocId) {
+  deletePocEntry(decodeFromAttr(encodedPocId));
+}
+
 function canEditDbEntry(entry) {
   if (!APP.user || !entry) return false;
   if (APP.role === 'manager') return true;
@@ -1679,7 +1742,7 @@ function getTrackDbFilteredEntries() {
 
 function renderTrackDbTableRows(entries, { showCoordinator = false } = {}) {
   const isManager = APP.role === 'manager';
-  const colspan = showCoordinator ? 6 : 5;
+  const colspan = showCoordinator ? 7 : 6;
   if (!entries.length) {
     return `<tr><td colspan="${colspan}"><div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">No companies found</div></div></td></tr>`;
   }
@@ -1705,6 +1768,14 @@ function renderTrackDbTableRows(entries, { showCoordinator = false } = {}) {
         </td>
         <td>${entry.sourceTaskId ? '<span class="badge badge-blue">Task</span>' : '<span class="badge badge-gray">Direct</span>'}</td>
         <td>${entry.pocId ? '<span class="badge badge-green">Linked</span>' : '<span class="badge badge-gray">—</span>'}</td>
+        <td>
+          ${editable ? `
+            <div class="d-flex gap-2">
+              <button class="btn btn-ghost btn-sm" onclick="editDbCompanyEntryByEncoded('${encodedEntryId}')">✏️ Edit</button>
+              <button class="btn btn-ghost btn-sm" onclick="deleteDbCompanyEntryByEncoded('${encodedEntryId}')">🗑️ Delete</button>
+            </div>
+          ` : '—'}
+        </td>
       </tr>
     `;
   }).join('');
@@ -1783,6 +1854,7 @@ function renderTrackDb() {
                 <th>Comments</th>
                 <th>Source</th>
                 <th>POC</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>${renderTrackDbTableRows(entries, { showCoordinator: isManager })}</tbody>
@@ -1812,7 +1884,7 @@ function renderTrackDb() {
                 ${expanded ? `
                   <div class="table-wrap">
                     <table>
-                      <thead><tr><th>Company</th><th>Status</th><th>Comments</th><th>Source</th><th>POC</th></tr></thead>
+                      <thead><tr><th>Company</th><th>Status</th><th>Comments</th><th>Source</th><th>POC</th><th>Actions</th></tr></thead>
                       <tbody>${renderTrackDbTableRows(rowEntries, { showCoordinator: false })}</tbody>
                     </table>
                   </div>
@@ -1923,6 +1995,50 @@ async function updateDbCompanyStatus(companyId, status) {
 
 async function updateDbCompanyStatusByEncoded(encodedCompanyId, status) {
   await updateDbCompanyStatus(decodeFromAttr(encodedCompanyId), status);
+}
+
+async function editDbCompanyEntry(companyId) {
+  const entry = DATA.dbCompanies.find(item => item.id === companyId);
+  if (!entry || !canEditDbEntry(entry)) return;
+  const companyName = prompt('Edit company name:', entry.companyName || '')?.trim();
+  if (!companyName) return;
+  const existing = findDbCompanyEntry(companyName, entry.coordinatorId);
+  if (existing && existing.id !== entry.id) {
+    alert('A company with this name already exists for this coordinator.');
+    return;
+  }
+  const statusInput = prompt(`Edit status (${DB_STATUS_OPTIONS.join(', ')}):`, entry.status || 'Mail Sent');
+  if (statusInput === null) return;
+  const status = String(statusInput || '').trim();
+  if (!DB_STATUS_OPTIONS.includes(status)) {
+    alert(`Status must be one of: ${DB_STATUS_OPTIONS.join(', ')}.`);
+    return;
+  }
+  const commentInput = prompt('Edit comment (optional):', entry.comment || '');
+  if (commentInput === null) return;
+  entry.companyName = companyName;
+  entry.comment = String(commentInput || '').trim();
+  entry.updatedAt = new Date().toISOString();
+  await updateDbCompanyStatus(companyId, status);
+  renderTrackDb();
+}
+
+async function editDbCompanyEntryByEncoded(encodedCompanyId) {
+  await editDbCompanyEntry(decodeFromAttr(encodedCompanyId));
+}
+
+function deleteDbCompanyEntry(companyId) {
+  const idx = DATA.dbCompanies.findIndex(item => item.id === companyId);
+  if (idx === -1) return;
+  const entry = DATA.dbCompanies[idx];
+  if (!canEditDbEntry(entry)) return;
+  if (!confirm('Delete this Track DB entry?')) return;
+  DATA.dbCompanies.splice(idx, 1);
+  renderTrackDb();
+}
+
+function deleteDbCompanyEntryByEncoded(encodedCompanyId) {
+  deleteDbCompanyEntry(decodeFromAttr(encodedCompanyId));
 }
 
 // ── NOTIFICATIONS PAGE ──
