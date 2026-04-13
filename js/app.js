@@ -313,12 +313,41 @@ function parseCsvTextToRows(text) {
 function normalizeDateForInput(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const ymdMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymdMatch) {
+    const year = Number(ymdMatch[1]);
+    const month = Number(ymdMatch[2]);
+    const day = Number(ymdMatch[3]);
+    const normalized = new Date(Date.UTC(year, month - 1, day));
+    if (
+      normalized.getUTCFullYear() === year &&
+      normalized.getUTCMonth() + 1 === month &&
+      normalized.getUTCDate() === day
+    ) {
+      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+    return '';
+  }
+  const dmyMatch = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const month = Number(dmyMatch[2]);
+    const year = Number(dmyMatch[3]);
+    const normalized = new Date(Date.UTC(year, month - 1, day));
+    if (
+      normalized.getUTCFullYear() === year &&
+      normalized.getUTCMonth() + 1 === month &&
+      normalized.getUTCDate() === day
+    ) {
+      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+    return '';
+  }
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return '';
-  const year = parsed.getFullYear();
-  const month = String(parsed.getMonth() + 1).padStart(2, '0');
-  const day = String(parsed.getDate()).padStart(2, '0');
+  const year = parsed.getUTCFullYear();
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
@@ -1308,14 +1337,14 @@ async function uploadManagerTimelineCsv() {
     renderTimeline();
     return;
   }
-  DATA.managerTimeline.unshift(...entries);
+  DATA.managerTimeline.push(...entries);
   setManagerTimelineMessage(`${entries.length} timeline entr${entries.length === 1 ? 'y' : 'ies'} added.`, 'success');
   renderTimeline();
 }
 
 function addManagerTimelineItem() {
   if (APP.role !== 'manager') return;
-  DATA.managerTimeline.unshift({
+  DATA.managerTimeline.push({
     id: createId('manager-timeline'),
     task: '',
     deadline: '',
@@ -1330,12 +1359,18 @@ function updateManagerTimelineField(id, field, value) {
   if (APP.role !== 'manager') return;
   const item = DATA.managerTimeline.find(entry => entry.id === id);
   if (!item) return;
-  if (field === 'deadline') {
-    item.deadline = normalizeDateForInput(value);
-    return;
-  }
-  if (field === 'task' || field === 'comments') {
-    item[field] = String(value || '');
+  switch (field) {
+    case 'deadline':
+      item.deadline = normalizeDateForInput(value);
+      renderTimeline();
+      return;
+    case 'task':
+    case 'comments':
+      item[field] = String(value || '');
+      renderTimeline();
+      return;
+    default:
+      console.warn('Invalid manager timeline field:', field);
   }
 }
 
@@ -1348,6 +1383,7 @@ function toggleManagerTimelineCompleted(id, completed) {
   const item = DATA.managerTimeline.find(entry => entry.id === id);
   if (!item) return;
   item.completed = !!completed;
+  renderTimeline();
 }
 
 function toggleManagerTimelineCompletedByEncoded(encodedId, completed) {
@@ -1439,7 +1475,7 @@ function renderManagerTimelineView() {
         <div class="d-flex gap-3 items-center mb-4" style="flex-wrap:wrap">
           <input type="file" class="form-input" id="manager-timeline-csv-file" accept=".csv,text/csv" style="min-width:220px;flex:1">
           <button class="btn btn-primary" onclick="uploadManagerTimelineCsv()">Upload CSV</button>
-          <button class="btn btn-secondary" onclick="addManagerTimelineItem()">＋ Add Sub Timeline</button>
+          <button class="btn btn-secondary" onclick="addManagerTimelineItem()">+ Add Timeline Entry</button>
         </div>
         <div class="text-sm text-muted mb-3">CSV format: <strong>Task, Deadline, Comments</strong>. Comments can be blank.</div>
         ${APP.managerTimelineMessage.text ? `<div class="mb-4"><span class="badge ${messageClass}">${escapeHtml(APP.managerTimelineMessage.text)}</span></div>` : ''}
@@ -1459,14 +1495,14 @@ function renderManagerTimelineView() {
                 const encodedId = encodeForAttr(item.id);
                 return `
                   <tr>
-                    <td><input class="form-input" value="${escapeHtml(item.task)}" placeholder="Enter task" oninput="updateManagerTimelineFieldByEncoded('${encodedId}','task',this.value)"></td>
-                    <td><input type="date" class="form-input" value="${item.deadline || ''}" oninput="updateManagerTimelineFieldByEncoded('${encodedId}','deadline',this.value)"></td>
-                    <td><input class="form-input" value="${escapeHtml(item.comments)}" placeholder="Optional" oninput="updateManagerTimelineFieldByEncoded('${encodedId}','comments',this.value)"></td>
+                    <td><input class="form-input" value="${escapeHtml(item.task)}" placeholder="Enter task" onchange="updateManagerTimelineFieldByEncoded('${encodedId}','task',this.value)"></td>
+                    <td><input type="date" class="form-input" value="${escapeHtml(item.deadline || '')}" onchange="updateManagerTimelineFieldByEncoded('${encodedId}','deadline',this.value)"></td>
+                    <td><input class="form-input" value="${escapeHtml(item.comments)}" placeholder="Optional" onchange="updateManagerTimelineFieldByEncoded('${encodedId}','comments',this.value)"></td>
                     <td><label class="d-flex items-center gap-2" style="font-size:13px"><input type="checkbox" ${item.completed ? 'checked' : ''} onchange="toggleManagerTimelineCompletedByEncoded('${encodedId}',this.checked)"><span>Done</span></label></td>
                     <td><button class="btn btn-ghost btn-sm" onclick="deleteManagerTimelineItemByEncoded('${encodedId}')">Delete</button></td>
                   </tr>
                 `;
-              }).join('') : `<tr><td colspan="5"><div class="text-sm text-muted">No sub timelines yet. Upload a CSV or add one manually.</div></td></tr>`}
+              }).join('') : `<tr><td colspan="5"><div class="text-sm text-muted">No timeline entries yet. Upload a CSV or add one manually.</div></td></tr>`}
             </tbody>
           </table>
         </div>
