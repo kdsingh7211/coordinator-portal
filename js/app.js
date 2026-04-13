@@ -1425,6 +1425,14 @@ document.addEventListener('DOMContentLoaded', () => {
     APP.users = loadUsers();
     hydrateSession();
 
+    const loginForm = document.getElementById('login-form');
+    if (loginForm) {
+      loginForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        handleLogin();
+      });
+    }
+
     if (APP.role && APP.user) {
       document.getElementById('login-page').style.display = 'none';
       document.getElementById('app').style.display = 'flex';
