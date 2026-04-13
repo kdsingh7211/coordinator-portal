@@ -2743,24 +2743,15 @@ async function handleSignIn() {
     return;
   }
 
-  const users = loadUsers();
-  console.log('LOGIN: all users in localStorage =', JSON.stringify(users, null, 2));
-  const user = users.find(u => u.username === username);
-  console.log('LOGIN RESULT: user found =', user ? user.name : 'NOT FOUND');
-  if (!user) {
-    setLoginError('Invalid username or password.');
-    return;
-  }
   console.log('LOGIN: hashing entered password...');
   const hash = await hashPassword(password);
   console.log('LOGIN: entered password hash =', hash);
   console.log('LOGIN: hash length =', hash.length);
-  users.forEach(u => {
-    console.log('LOGIN: checking user =', u.username);
-    console.log('LOGIN: stored hash =', u.passwordHash);
-    console.log('LOGIN: hashes match =', u.passwordHash === hash);
-  });
-  if (user.passwordHash !== hash) {
+  const users = loadUsers();
+  console.log('LOGIN: all users in localStorage =', JSON.stringify(users, null, 2));
+  const user = users.find(u => u.username === username && u.passwordHash === hash);
+  console.log('LOGIN RESULT: user found =', user ? user.name : 'NOT FOUND');
+  if (!user) {
     setLoginError('Invalid username or password.');
     return;
   }
