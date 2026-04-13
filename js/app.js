@@ -16,6 +16,8 @@ const APP = {
   trackDbViewMode: 'all',
   trackDbStatusFilter: 'all',
   trackDbExpandedCoordinators: {},
+  timelineTab: 'task',
+  managerTimelineMessage: { type: '', text: '' },
 };
 
 // ── SEED DATA ──
@@ -24,6 +26,7 @@ const DATA = {
   categories: ['Incubators', 'Startups', 'Email Outreach', 'Database Work', 'Events', 'Research'],
   pocCategories: ['Incentive Partner', 'Investor', 'Mentor', 'Corporate'],
   tasks: [],
+  managerTimeline: [],
   pocs: [],
   dbCompanies: [],
   resources: [
@@ -305,6 +308,84 @@ function parseCsvTextToRows(text) {
   row.push(cell);
   if (row.length > 1 || row[0].trim()) rows.push(row);
   return rows;
+}
+
+function normalizeDateForInput(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const ymdMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymdMatch) {
+    const year = Number(ymdMatch[1]);
+    const month = Number(ymdMatch[2]);
+    const day = Number(ymdMatch[3]);
+    const normalized = new Date(Date.UTC(year, month - 1, day));
+    if (
+      normalized.getUTCFullYear() === year &&
+      normalized.getUTCMonth() + 1 === month &&
+      normalized.getUTCDate() === day
+    ) {
+      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+    return '';
+  }
+  const dmyMatch = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const month = Number(dmyMatch[2]);
+    const year = Number(dmyMatch[3]);
+    const normalized = new Date(Date.UTC(year, month - 1, day));
+    if (
+      normalized.getUTCFullYear() === year &&
+      normalized.getUTCMonth() + 1 === month &&
+      normalized.getUTCDate() === day
+    ) {
+      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+    return '';
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return '';
+  const year = parsed.getUTCFullYear();
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseManagerTimelineCsv(text) {
+  const rows = parseCsvTextToRows(String(text || '').replace(/^\uFEFF/, ''));
+  if (!rows.length) return { entries: [], error: 'CSV is empty.' };
+  const header = rows[0].map(h => String(h || '').trim().toLowerCase());
+  const idxTask = header.indexOf('task');
+  const idxDeadline = header.indexOf('deadline');
+  const idxComments = header.indexOf('comments');
+  if (idxTask === -1 || idxDeadline === -1 || idxComments === -1) {
+    return { entries: [], error: 'CSV must include columns: Task, Deadline, Comments.' };
+  }
+  const entries = [];
+  for (let i = 1; i < rows.length; i += 1) {
+    const source = rows[i];
+    const task = String(source[idxTask] || '').trim();
+    const deadlineRaw = String(source[idxDeadline] || '').trim();
+    const comments = String(source[idxComments] || '').trim();
+    const isEmptyRow = !task && !deadlineRaw && !comments;
+    if (isEmptyRow) continue;
+    if (!task || !deadlineRaw) {
+      return { entries: [], error: `Row ${i + 1}: Task and Deadline are required.` };
+    }
+    const deadline = normalizeDateForInput(deadlineRaw);
+    if (!deadline) {
+      return { entries: [], error: `Row ${i + 1}: Deadline must be a valid date.` };
+    }
+    entries.push({
+      id: createId('manager-timeline'),
+      task,
+      deadline,
+      comments,
+      completed: false
+    });
+  }
+  if (!entries.length) return { entries: [], error: 'CSV has no data rows.' };
+  return { entries, error: '' };
 }
 
 function parseDbCsv(text) {
@@ -1218,30 +1299,112 @@ function deleteTask(taskId) {
 }
 
 // ── TIMELINE PAGE ──
-function renderTimeline() {
-  const el = document.getElementById('page-timeline');
-  const isManager = APP.role === 'manager';
-  let tasks = DATA.tasks;
-  if (!isManager && APP.user) tasks = tasks.filter(t => t.assignedTo === APP.user.id);
+function setTimelineTab(tab) {
+  APP.timelineTab = tab === 'manager' ? 'manager' : 'task';
+  renderTimeline();
+}
 
-  // Group by month
-  const byMonth = {};
-  tasks.forEach(t => {
-    if (!t.deadline) return;
-    const d = new Date(t.deadline);
-    const key = d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-    if (!byMonth[key]) byMonth[key] = [];
-    byMonth[key].push(t);
+function setManagerTimelineMessage(text, type = '') {
+  APP.managerTimelineMessage = { text: String(text || ''), type: String(type || '') };
+}
+
+async function uploadManagerTimelineCsv() {
+  if (APP.role !== 'manager') return;
+  const fileInput = document.getElementById('manager-timeline-csv-file');
+  const file = fileInput?.files?.[0];
+  if (!file) {
+    setManagerTimelineMessage('Please choose a CSV file.', 'error');
+    renderTimeline();
+    return;
+  }
+  const isCsv = file.name?.toLowerCase().endsWith('.csv') || file.type === 'text/csv';
+  if (!isCsv) {
+    setManagerTimelineMessage('Please upload a valid CSV file.', 'error');
+    renderTimeline();
+    return;
+  }
+  let text = '';
+  try {
+    text = await file.text();
+  } catch {
+    setManagerTimelineMessage('Unable to read the selected file.', 'error');
+    renderTimeline();
+    return;
+  }
+  const { entries, error } = parseManagerTimelineCsv(text);
+  if (error) {
+    setManagerTimelineMessage(error, 'error');
+    renderTimeline();
+    return;
+  }
+  DATA.managerTimeline.push(...entries);
+  setManagerTimelineMessage(`${entries.length} timeline entr${entries.length === 1 ? 'y' : 'ies'} added.`, 'success');
+  renderTimeline();
+}
+
+function addManagerTimelineItem() {
+  if (APP.role !== 'manager') return;
+  DATA.managerTimeline.push({
+    id: createId('manager-timeline'),
+    task: '',
+    deadline: '',
+    comments: '',
+    completed: false
   });
+  setManagerTimelineMessage('', '');
+  renderTimeline();
+}
 
-  el.innerHTML = `
-    <div class="section-header">
-      <div>
-        <div class="section-title">Timeline</div>
-        <div class="section-desc">All task deadlines in chronological order</div>
-      </div>
-    </div>
+function updateManagerTimelineField(id, field, value) {
+  if (APP.role !== 'manager') return;
+  const item = DATA.managerTimeline.find(entry => entry.id === id);
+  if (!item) return;
+  switch (field) {
+    case 'deadline':
+      item.deadline = normalizeDateForInput(value);
+      renderTimeline();
+      return;
+    case 'task':
+    case 'comments':
+      item[field] = String(value || '');
+      renderTimeline();
+      return;
+    default:
+      console.warn('Invalid manager timeline field:', field);
+  }
+}
 
+function updateManagerTimelineFieldByEncoded(encodedId, field, value) {
+  updateManagerTimelineField(decodeFromAttr(encodedId), field, value);
+}
+
+function toggleManagerTimelineCompleted(id, completed) {
+  if (APP.role !== 'manager') return;
+  const item = DATA.managerTimeline.find(entry => entry.id === id);
+  if (!item) return;
+  item.completed = !!completed;
+  renderTimeline();
+}
+
+function toggleManagerTimelineCompletedByEncoded(encodedId, completed) {
+  toggleManagerTimelineCompleted(decodeFromAttr(encodedId), completed);
+}
+
+function deleteManagerTimelineItem(id) {
+  if (APP.role !== 'manager') return;
+  const idx = DATA.managerTimeline.findIndex(entry => entry.id === id);
+  if (idx === -1) return;
+  DATA.managerTimeline.splice(idx, 1);
+  setManagerTimelineMessage('', '');
+  renderTimeline();
+}
+
+function deleteManagerTimelineItemByEncoded(encodedId) {
+  deleteManagerTimelineItem(decodeFromAttr(encodedId));
+}
+
+function renderTaskTimelineView(tasks, byMonth) {
+  return `
     <div class="card mb-6">
       <div class="card-header"><span class="card-title">📅 Gantt Overview</span></div>
       <div class="card-body">
@@ -1290,6 +1453,95 @@ function renderTimeline() {
         </div>
       </div>
     `).join('')}
+  `;
+}
+
+function renderManagerTimelineView() {
+  const rows = [...DATA.managerTimeline].sort((a, b) => {
+    if (!a.deadline && !b.deadline) return 0;
+    if (!a.deadline) return 1;
+    if (!b.deadline) return -1;
+    return new Date(a.deadline) - new Date(b.deadline);
+  });
+  const messageClass = APP.managerTimelineMessage.type === 'error'
+    ? 'badge-red'
+    : APP.managerTimelineMessage.type === 'success'
+      ? 'badge-green'
+      : 'badge-gray';
+  return `
+    <div class="card mb-6">
+      <div class="card-header"><span class="card-title">Eureka! Manager Timeline</span></div>
+      <div class="card-body">
+        <div class="d-flex gap-3 items-center mb-4" style="flex-wrap:wrap">
+          <input type="file" class="form-input" id="manager-timeline-csv-file" accept=".csv,text/csv" style="min-width:220px;flex:1">
+          <button class="btn btn-primary" onclick="uploadManagerTimelineCsv()">Upload CSV</button>
+          <button class="btn btn-secondary" onclick="addManagerTimelineItem()">+ Add Timeline Entry</button>
+        </div>
+        <div class="text-sm text-muted mb-3">CSV format: <strong>Task, Deadline, Comments</strong>. Comments can be blank.</div>
+        ${APP.managerTimelineMessage.text ? `<div class="mb-4"><span class="badge ${messageClass}">${escapeHtml(APP.managerTimelineMessage.text)}</span></div>` : ''}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="min-width:220px">Task</th>
+                <th style="min-width:160px">Deadline</th>
+                <th style="min-width:220px">Comments</th>
+                <th style="width:120px">Completed</th>
+                <th style="width:96px">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.length ? rows.map(item => {
+                const encodedId = encodeForAttr(item.id);
+                return `
+                  <tr>
+                    <td><input class="form-input" value="${escapeHtml(item.task)}" placeholder="Enter task" onchange="updateManagerTimelineFieldByEncoded('${encodedId}','task',this.value)"></td>
+                    <td><input type="date" class="form-input" value="${escapeHtml(item.deadline || '')}" onchange="updateManagerTimelineFieldByEncoded('${encodedId}','deadline',this.value)"></td>
+                    <td><input class="form-input" value="${escapeHtml(item.comments)}" placeholder="Optional" onchange="updateManagerTimelineFieldByEncoded('${encodedId}','comments',this.value)"></td>
+                    <td><label class="d-flex items-center gap-2" style="font-size:13px"><input type="checkbox" ${item.completed ? 'checked' : ''} onchange="toggleManagerTimelineCompletedByEncoded('${encodedId}',this.checked)"><span>Done</span></label></td>
+                    <td><button class="btn btn-ghost btn-sm" onclick="deleteManagerTimelineItemByEncoded('${encodedId}')">Delete</button></td>
+                  </tr>
+                `;
+              }).join('') : `<tr><td colspan="5"><div class="text-sm text-muted">No timeline entries yet. Upload a CSV or add one manually.</div></td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTimeline() {
+  const el = document.getElementById('page-timeline');
+  const isManager = APP.role === 'manager';
+  if (!isManager && APP.timelineTab === 'manager') APP.timelineTab = 'task';
+  let tasks = DATA.tasks;
+  if (!isManager && APP.user) tasks = tasks.filter(t => t.assignedTo === APP.user.id);
+
+  // Group by month
+  const byMonth = {};
+  tasks.forEach(t => {
+    if (!t.deadline) return;
+    const d = new Date(t.deadline);
+    const key = d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    if (!byMonth[key]) byMonth[key] = [];
+    byMonth[key].push(t);
+  });
+
+  el.innerHTML = `
+    <div class="section-header">
+      <div>
+        <div class="section-title">Timeline</div>
+        <div class="section-desc">All task deadlines in chronological order</div>
+      </div>
+    </div>
+
+    <div class="tabs" style="margin-bottom:var(--sp-4)">
+      <div class="tab ${APP.timelineTab === 'task' ? 'active' : ''}" onclick="setTimelineTab('task')">Timeline</div>
+      ${isManager ? `<div class="tab ${APP.timelineTab === 'manager' ? 'active' : ''}" onclick="setTimelineTab('manager')">Eureka! Manager Timeline</div>` : ''}
+    </div>
+
+    ${APP.timelineTab === 'manager' && isManager ? renderManagerTimelineView() : renderTaskTimelineView(tasks, byMonth)}
   `;
 }
 
