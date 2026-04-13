@@ -8,9 +8,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="CoordPortal">
   <meta name="description" content="Coordinator Portal — Task management for teams">
-  <link rel="manifest" href="/coordinator-portal/manifest.json">
+  <link rel="manifest" href="./manifest.json">
   <title>Coordinator Portal</title>
-  <link rel="stylesheet" href="/coordinator-portal/css/style.css">
+  <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
 
@@ -20,7 +20,7 @@
     <div class="login-logo">⚡ CoordPortal</div>
     <div class="login-sub">Task management for coordinators and managers.</div>
 
-    <form id="login-form">
+    <form id="login-form" onsubmit="event.preventDefault(); handleLogin();">
       <div id="login-step1">
         <div class="form-group">
           <label class="form-label">Username</label>
@@ -30,10 +30,10 @@
           <label class="form-label">Password</label>
           <input class="form-input" id="login-password" type="password" autocomplete="current-password" placeholder="••••••••">
         </div>
-        <div id="login-error" class="text-sm" style="color:var(--danger);display:none"></div>
       </div>
 
       <div id="login-step2" style="display:none; margin-top:var(--sp-4)"></div>
+      <div id="login-error" class="text-sm" style="color:var(--danger);display:none"></div>
 
       <button id="login-proceed-btn" class="btn btn-primary w-full btn-lg" style="margin-top:var(--sp-4);justify-content:center" type="submit">
         Sign In
@@ -245,6 +245,6 @@
   </div>
 </div>
 
-<script src="/coordinator-portal/js/app.js"></script>
+<script src="./js/app.js"></script>
 </body>
 </html>

@@ -1289,7 +1289,12 @@ function setLoginError(message) {
 }
 
 function hydrateSession() {
-  const session = JSON.parse(sessionStorage.getItem('cp-session') || 'null');
+  let session = null;
+  try {
+    session = JSON.parse(sessionStorage.getItem('cp-session') || 'null');
+  } catch {
+    sessionStorage.removeItem('cp-session');
+  }
   if (!session) {
     APP.role = null;
     APP.user = null;
@@ -1424,14 +1429,6 @@ document.addEventListener('DOMContentLoaded', () => {
     await ensureSeedManagers();
     APP.users = loadUsers();
     hydrateSession();
-
-    const loginForm = document.getElementById('login-form');
-    if (loginForm) {
-      loginForm.addEventListener('submit', (event) => {
-        event.preventDefault();
-        handleLogin();
-      });
-    }
 
     if (APP.role && APP.user) {
       document.getElementById('login-page').style.display = 'none';
