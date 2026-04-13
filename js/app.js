@@ -707,11 +707,15 @@ function refreshTaskCategorySelect(selectedCategory) {
   select.innerHTML = renderTaskCategoryOptions(selectedCategory);
 }
 
+function sameCategory(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
 function addTaskCategory() {
   if (APP.role !== 'manager') return;
   const name = prompt('Enter new category name:')?.trim();
   if (!name) return;
-  if (DATA.categories.some(c => c.toLowerCase() === name.toLowerCase())) {
+  if (DATA.categories.some(c => sameCategory(c, name))) {
     alert('Category already exists.');
     return;
   }
@@ -726,15 +730,15 @@ function renameTaskCategory() {
   if (!current) return;
   const next = prompt('Edit category name:', current)?.trim();
   if (!next || next === current) return;
-  if (DATA.categories.some(c => c.toLowerCase() === next.toLowerCase() && c !== current)) {
+  if (DATA.categories.some(c => sameCategory(c, next) && !sameCategory(c, current))) {
     alert('Category already exists.');
     return;
   }
-  const idx = DATA.categories.findIndex(c => c === current);
+  const idx = DATA.categories.findIndex(c => sameCategory(c, current));
   if (idx === -1) return;
   DATA.categories[idx] = next;
   DATA.tasks.forEach(t => {
-    if (t.category === current) t.category = next;
+    if (sameCategory(t.category, current)) t.category = next;
   });
   refreshTaskCategorySelect(next);
 }
@@ -749,10 +753,10 @@ function deleteTaskCategory() {
     return;
   }
   if (!confirm(`Delete "${current}" category? Tasks in this category will move to "Uncategorized".`)) return;
-  DATA.categories = DATA.categories.filter(c => c !== current);
-  if (!DATA.categories.includes('Uncategorized')) DATA.categories.push('Uncategorized');
+  DATA.categories = DATA.categories.filter(c => !sameCategory(c, current));
+  if (!DATA.categories.some(c => sameCategory(c, 'Uncategorized'))) DATA.categories.push('Uncategorized');
   DATA.tasks.forEach(t => {
-    if (t.category === current) t.category = 'Uncategorized';
+    if (sameCategory(t.category, current)) t.category = 'Uncategorized';
   });
   refreshTaskCategorySelect('Uncategorized');
 }
@@ -995,8 +999,8 @@ function renderResources() {
     </div>
 
     <div class="tabs" id="res-tabs">
-      <div class="tab active" onclick="filterRes('all', this)">All</div>
-      ${cats.map(c => `<div class="tab" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</div>`).join('')}
+      <div class="tab active" data-cat="all">All</div>
+      ${cats.map(c => `<div class="tab" data-cat="${escapeHtml(encodeURIComponent(c))}">${escapeHtml(c)}</div>`).join('')}
     </div>
 
     <div class="resource-grid" id="res-grid">
@@ -1004,15 +1008,12 @@ function renderResources() {
     </div>
   `;
 
-  document.querySelectorAll('#res-tabs [data-cat]').forEach(tab => {
-    tab.onclick = () => window.filterRes(tab.dataset.cat, tab);
-  });
-
   window.filterRes = (cat, tab) => {
     document.querySelectorAll('#res-tabs .tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
     const filtered = cat === 'all' ? DATA.resources : DATA.resources.filter(r => r.category === cat);
     document.getElementById('res-grid').innerHTML = renderResourceCards(filtered, isManager);
+    bindResourceActions(isManager);
   };
   window.searchResources = (q) => {
     const filtered = DATA.resources.filter(r =>
@@ -1020,24 +1021,56 @@ function renderResources() {
       r.desc.toLowerCase().includes(q.toLowerCase())
     );
     document.getElementById('res-grid').innerHTML = renderResourceCards(filtered, isManager);
+    bindResourceActions(isManager);
   };
+
+  document.querySelectorAll('#res-tabs .tab').forEach(tab => {
+    tab.onclick = () => {
+      const encodedCat = tab.dataset.cat || 'all';
+      const cat = encodedCat === 'all' ? 'all' : decodeURIComponent(encodedCat);
+      window.filterRes(cat, tab);
+    };
+  });
+  bindResourceActions(isManager);
 }
 
 function renderResourceCards(resources, isManager) {
   if (!resources.length) return `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🔍</div><div class="empty-title">No resources found</div></div>`;
   return resources.map(r => `
-    <div class="resource-card" onclick="window.open('${escapeHtml(sanitizeUrl(r.url))}','_blank','noopener,noreferrer')">
+    <div class="resource-card" data-resource-url="${escapeHtml(encodeURIComponent(sanitizeUrl(r.url)))}">
       <div class="resource-icon" style="background:var(--accent-light)">${escapeHtml(r.icon)}</div>
       <div class="resource-name">${escapeHtml(r.name)}</div>
       <div class="resource-desc">${escapeHtml(r.desc)}</div>
       <div class="resource-type">${escapeHtml(r.type)}</div>
       ${isManager ? `
-      <div class="d-flex gap-2 mt-3" onclick="event.stopPropagation()">
-        <button class="btn btn-ghost btn-sm" onclick="openResourceModal('${r.id}')">✏️ Edit</button>
-        <button class="btn btn-ghost btn-sm" onclick="deleteResource('${r.id}')">🗑️ Delete</button>
+      <div class="d-flex gap-2 mt-3">
+        <button class="btn btn-ghost btn-sm" data-resource-edit-id="${r.id}">✏️ Edit</button>
+        <button class="btn btn-ghost btn-sm" data-resource-delete-id="${r.id}">🗑️ Delete</button>
       </div>` : ''}
     </div>
   `).join('');
+}
+
+function bindResourceActions(isManager) {
+  document.querySelectorAll('#res-grid .resource-card').forEach(card => {
+    card.onclick = () => {
+      const safeUrl = sanitizeUrl(decodeURIComponent(card.dataset.resourceUrl || '#'));
+      window.open(safeUrl, '_blank', 'noopener,noreferrer');
+    };
+  });
+  if (!isManager) return;
+  document.querySelectorAll('#res-grid [data-resource-edit-id]').forEach(btn => {
+    btn.onclick = (event) => {
+      event.stopPropagation();
+      openResourceModal(btn.dataset.resourceEditId);
+    };
+  });
+  document.querySelectorAll('#res-grid [data-resource-delete-id]').forEach(btn => {
+    btn.onclick = (event) => {
+      event.stopPropagation();
+      deleteResource(btn.dataset.resourceDeleteId);
+    };
+  });
 }
 
 function openResourceModal(resourceId) {
@@ -1088,9 +1121,14 @@ function saveResource() {
   const type = document.getElementById('res-type')?.value?.trim();
   const icon = document.getElementById('res-icon')?.value?.trim() || '📚';
   const desc = document.getElementById('res-desc')?.value?.trim();
-  const url = sanitizeUrl(document.getElementById('res-url')?.value);
+  const rawUrl = document.getElementById('res-url')?.value?.trim() || '';
+  const url = sanitizeUrl(rawUrl);
   if (!name || !category || !type || !desc) {
     alert('Please fill in all required resource fields.');
+    return;
+  }
+  if (rawUrl && rawUrl !== '#' && url === '#') {
+    alert('Please enter a valid URL (http://, https://, mailto:, or tel:) or use #.');
     return;
   }
   if (APP.editingResourceId) {
