@@ -139,6 +139,12 @@ function getCoordinator(id) {
   return { ...coord, initials: getInitials(coord.name) };
 }
 function getTask(id) { return DATA.tasks.find(t => t.id === id); }
+function createId(prefix = 'id') {
+  const uuid = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${uuid}`;
+}
 function escapeHtml(text) {
   const str = String(text ?? '');
   return str
@@ -1097,12 +1103,12 @@ function renderPoc() {
     const input = document.getElementById('poc-new-category');
     const value = input?.value?.trim();
     if (!value) {
-      alert('Please enter a category name.');
+      alert('Please enter a category name for POC classification.');
       return;
     }
     const exists = DATA.pocCategories.some(c => c.toLowerCase() === value.toLowerCase());
     if (exists) {
-      alert('This category already exists. Please enter a different category name.');
+      alert('This category already exists. Please check the list below and enter a different category name.');
       return;
     }
     DATA.pocCategories.push(value);
@@ -1129,7 +1135,7 @@ function renderPoc() {
       ? Array.from(document.querySelectorAll('.poc-share-manager:checked')).map(el => el.value)
       : [];
     DATA.pocs.unshift({
-      id: crypto.randomUUID(),
+      id: createId('poc'),
       name,
       organization,
       category,
