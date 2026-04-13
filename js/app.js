@@ -1097,12 +1097,12 @@ function renderPoc() {
     const input = document.getElementById('poc-new-category');
     const value = input?.value?.trim();
     if (!value) {
-      alert('Please enter a category name.');
+      alert('Please enter a category name (at least 1 character).');
       return;
     }
     const exists = DATA.pocCategories.some(c => c.toLowerCase() === value.toLowerCase());
     if (exists) {
-      alert('This category already exists.');
+      alert('This category already exists. Please enter a different category name.');
       return;
     }
     DATA.pocCategories.push(value);
@@ -1117,12 +1117,12 @@ function renderPoc() {
     const email = document.getElementById('poc-email')?.value?.trim() || '';
     const contact = document.getElementById('poc-contact')?.value?.trim() || '';
     if (!name) {
-      alert('Please enter a name.');
+      alert('Please enter the POC name.');
       return;
     }
     const category = selectedCategory === 'Other' ? customCategory : selectedCategory;
     if (!category) {
-      alert('Please select or enter a category.');
+      alert('Please select a category, or if "Other" is selected, enter a custom category.');
       return;
     }
     const sharedManagerIds = APP.role === 'manager'
