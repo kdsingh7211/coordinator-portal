@@ -182,6 +182,22 @@ function getVisiblePocs() {
   return DATA.pocs.filter(p => p.createdByRole === 'coordinator' && p.createdBy === userId);
 }
 
+function encodeForAttr(value) {
+  return encodeURIComponent(String(value ?? ''));
+}
+
+function decodeFromAttr(value) {
+  try {
+    return decodeURIComponent(String(value ?? ''));
+  } catch {
+    return String(value ?? '');
+  }
+}
+
+function toDomSafeId(value) {
+  return String(value ?? '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
 function normalizeCompanyName(name) {
   return String(name || '').trim().toLowerCase();
 }
@@ -202,11 +218,12 @@ function findDbCompanyEntry(companyName, coordinatorId) {
 
 function ensureUniqueContacts(existingContacts, nextContacts) {
   const merged = [...(existingContacts || [])];
-  const existingKeys = new Set(merged.map(c => `${String(c.name || '').trim().toLowerCase()}|${String(c.email || '').trim().toLowerCase()}`));
+  const makeContactKey = (name, email) => `${String(name || '').trim().toLowerCase()}|${String(email || '').trim().toLowerCase()}`;
+  const existingKeys = new Set(merged.map(c => makeContactKey(c.name, c.email)));
   (nextContacts || []).forEach(contact => {
     const name = String(contact.name || '').trim();
     const email = String(contact.email || '').trim();
-    const key = `${name.toLowerCase()}|${email.toLowerCase()}`;
+    const key = makeContactKey(name, email);
     if (!name || !email || existingKeys.has(key)) return;
     existingKeys.add(key);
     merged.push({ name, email, company: String(contact.company || '').trim() });
@@ -744,6 +761,8 @@ function openTaskDetail(taskId) {
   const canUpdateStatus = isManager || isAssignedCoordinator;
   const coord = getCoordinator(task.assignedTo);
   const p = calcTaskProgress(task);
+  const encodedTaskId = encodeForAttr(task.id);
+  const taskDbFileInputId = `task-db-file-${toDomSafeId(task.id)}`;
   const dbUploads = task.dbRequired && APP.user
     ? DATA.dbCompanies.filter(entry => entry.sourceTaskId === task.id && entry.coordinatorId === APP.user.id)
     : [];
@@ -784,7 +803,7 @@ function openTaskDetail(taskId) {
       </div>
       ${canUpdateStatus ? `<div class="meta-item">
         <div class="meta-key">Update Status</div>
-        <select class="form-select mt-2" onchange="updateTaskStatus('${task.id}', this.value, this)">
+        <select class="form-select mt-2" onchange="updateTaskStatusByEncoded('${encodedTaskId}', this.value, this)">
           ${['Not Started','In Progress','Done'].map(s => `<option ${task.status===s?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>` : ''}
@@ -804,10 +823,10 @@ function openTaskDetail(taskId) {
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">CSV File</label>
-              <input type="file" class="form-input" id="task-db-file-${task.id}" accept=".csv,text/csv">
+              <input type="file" class="form-input" id="${taskDbFileInputId}" accept=".csv,text/csv">
             </div>
             <div class="form-group" style="align-self:flex-end">
-              <button class="btn btn-primary" onclick="uploadTaskDbCsv('${task.id}')">Upload DB CSV</button>
+              <button class="btn btn-primary" onclick="uploadTaskDbCsvByEncoded('${encodedTaskId}')">Upload DB CSV</button>
             </div>
           </div>
         </div>
@@ -912,6 +931,10 @@ function updateTaskStatus(taskId, status, selectEl) {
   renderDashboard();
 }
 
+function updateTaskStatusByEncoded(encodedTaskId, status, selectEl) {
+  updateTaskStatus(decodeFromAttr(encodedTaskId), status, selectEl);
+}
+
 async function uploadTaskDbCsv(taskId) {
   const task = getTask(taskId);
   if (!task || !APP.user) return;
@@ -919,7 +942,7 @@ async function uploadTaskDbCsv(taskId) {
     alert('Only the assigned coordinator can upload DB for this task.');
     return;
   }
-  const fileInput = document.getElementById(`task-db-file-${task.id}`);
+  const fileInput = document.getElementById(`task-db-file-${toDomSafeId(task.id)}`);
   const file = fileInput?.files?.[0];
   const ok = await importDbCsvFile(file, {
     coordinatorId: APP.user.id,
@@ -930,6 +953,10 @@ async function uploadTaskDbCsv(taskId) {
   if (fileInput) fileInput.value = '';
   alert('DB CSV uploaded successfully.');
   openTaskDetail(task.id);
+}
+
+async function uploadTaskDbCsvByEncoded(encodedTaskId) {
+  await uploadTaskDbCsv(decodeFromAttr(encodedTaskId));
 }
 
 function addComment(taskId) {
@@ -1659,6 +1686,7 @@ function renderTrackDbTableRows(entries, { showCoordinator = false } = {}) {
   return entries.map(entry => {
     const editable = canEditDbEntry(entry);
     const contactCount = Array.isArray(entry.contacts) ? entry.contacts.length : 0;
+    const encodedEntryId = encodeForAttr(entry.id);
     return `
       <tr>
         <td class="td-main">
@@ -1667,13 +1695,13 @@ function renderTrackDbTableRows(entries, { showCoordinator = false } = {}) {
         </td>
         ${showCoordinator ? `<td>${escapeHtml(entry.coordinatorName || getCoordinator(entry.coordinatorId)?.name || 'Unknown')}</td>` : ''}
         <td>
-          <select class="form-select" ${editable ? '' : 'disabled'} onchange="updateDbCompanyStatus('${entry.id}', this.value)">
+          <select class="form-select" ${editable ? '' : 'disabled'} onchange="updateDbCompanyStatusByEncoded('${encodedEntryId}', this.value)">
             ${DB_STATUS_OPTIONS.map(status => `<option ${entry.status === status ? 'selected' : ''}>${status}</option>`).join('')}
           </select>
           <div class="mt-1"><span class="badge ${dbStatusBadgeClass(entry.status)}">${escapeHtml(entry.status || '—')}</span></div>
         </td>
         <td>
-          <textarea class="form-input" rows="2" ${editable ? '' : 'disabled'} onblur="updateDbCompanyComment('${entry.id}', this.value)">${escapeHtml(entry.comment || '')}</textarea>
+          <textarea class="form-input" rows="2" ${editable ? '' : 'disabled'} onblur="updateDbCompanyCommentByEncoded('${encodedEntryId}', this.value)">${escapeHtml(entry.comment || '')}</textarea>
         </td>
         <td>${entry.sourceTaskId ? '<span class="badge badge-blue">Task</span>' : '<span class="badge badge-gray">Direct</span>'}</td>
         <td>${entry.pocId ? '<span class="badge badge-green">Linked</span>' : '<span class="badge badge-gray">—</span>'}</td>
@@ -1774,9 +1802,10 @@ function renderTrackDb() {
             const rowEntries = grouped[coordinatorId] || [];
             const coordinatorName = rowEntries[0]?.coordinatorName || getCoordinator(coordinatorId)?.name || 'Unknown';
             const expanded = !!APP.trackDbExpandedCoordinators[coordinatorId];
+            const encodedCoordinatorId = encodeForAttr(coordinatorId);
             return `
               <div class="card mb-4" style="overflow:hidden">
-                <button class="btn btn-secondary" style="width:100%;justify-content:space-between" onclick="toggleTrackDbCoordinator('${coordinatorId}')">
+                <button class="btn btn-secondary" style="width:100%;justify-content:space-between" onclick="toggleTrackDbCoordinatorByEncoded('${encodedCoordinatorId}')">
                   <span>${escapeHtml(coordinatorName)}</span>
                   <span>${rowEntries.length} compan${rowEntries.length === 1 ? 'y' : 'ies'} ${expanded ? '▲' : '▼'}</span>
                 </button>
@@ -1812,6 +1841,10 @@ function toggleTrackDbCoordinator(coordinatorId) {
   renderTrackDb();
 }
 
+function toggleTrackDbCoordinatorByEncoded(encodedCoordinatorId) {
+  toggleTrackDbCoordinator(decodeFromAttr(encodedCoordinatorId));
+}
+
 async function uploadTrackDbCsv() {
   if (!APP.user) return;
   const fileInput = document.getElementById('trackdb-upload-file');
@@ -1838,6 +1871,10 @@ function updateDbCompanyComment(companyId, value) {
   if (!entry || !canEditDbEntry(entry)) return;
   entry.comment = String(value || '').trim();
   entry.updatedAt = new Date().toISOString();
+}
+
+function updateDbCompanyCommentByEncoded(encodedCompanyId, value) {
+  updateDbCompanyComment(decodeFromAttr(encodedCompanyId), value);
 }
 
 async function promptAndCreatePocForDbCompany(entry) {
@@ -1882,6 +1919,10 @@ async function updateDbCompanyStatus(companyId, status) {
   entry.status = status;
   entry.updatedAt = new Date().toISOString();
   if (prevStatus !== status) renderTrackDb();
+}
+
+async function updateDbCompanyStatusByEncoded(encodedCompanyId, status) {
+  await updateDbCompanyStatus(decodeFromAttr(encodedCompanyId), status);
 }
 
 // ── NOTIFICATIONS PAGE ──
