@@ -2851,6 +2851,8 @@ function initApp() {
 
 // ── STARTUP ──
 document.addEventListener('DOMContentLoaded', async () => {
+  // TODO(remove after first deploy with unified password hashing): force one-time user reseed.
+  localStorage.removeItem('cp-users');
   console.log('APP INIT START');
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
