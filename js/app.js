@@ -307,7 +307,7 @@ function parseDbCsv(text) {
   const idxEmail = header.indexOf('email');
   const idxCompany = header.indexOf('company');
   if (idxName === -1 || idxEmail === -1 || idxCompany === -1) {
-    return { contacts: [], error: 'CSV must include exactly these columns: Name, Email, Company.' };
+    return { contacts: [], error: 'CSV must include columns: Name, Email, Company (column names are case-insensitive).' };
   }
   const contacts = [];
   for (let i = 1; i < rows.length; i += 1) {
@@ -922,7 +922,7 @@ function updateTaskStatus(taskId, status, selectEl) {
     return;
   }
   if (shouldBlockTaskCompletion(task, status, isAssignedCoordinator, APP.user.id)) {
-    alert('This task requires DB upload. Please upload a CSV (Name, Email, Company) before marking it Done.');
+    alert('This task requires DB upload. Please upload a CSV (Name, Email, Company) in the DB Upload Required section before marking it Done.');
     if (selectEl) selectEl.value = prevStatus;
     return;
   }
@@ -1854,7 +1854,7 @@ async function uploadTrackDbCsv() {
   if (APP.role === 'manager') {
     coordinatorId = document.getElementById('trackdb-upload-coordinator')?.value || '';
     if (!coordinatorId) {
-      alert('Please select a coordinator for this upload.');
+      alert('Please select a coordinator to associate with this CSV upload.');
       return;
     }
     coordinatorName = getCoordinator(coordinatorId)?.name || '';
@@ -1910,7 +1910,7 @@ async function updateDbCompanyStatus(companyId, status) {
   if (status === 'Accepted' && !entry.pocId) {
     const pocId = await promptAndCreatePocForDbCompany(entry);
     if (!pocId) {
-      alert('POC is required to mark a company as Accepted.');
+      alert('Cannot mark company as Accepted without creating a POC. Status change has been reverted.');
       renderTrackDb();
       return;
     }
