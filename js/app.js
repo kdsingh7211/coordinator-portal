@@ -867,7 +867,7 @@ function openTaskDetail(taskId) {
   const p = calcTaskProgress(task);
   const encodedTaskId = encodeForAttr(task.id);
   const coordinatorOptions = coordinators.length
-    ? coordinators.map(c => `<option value="${c.id}" ${task.assignedTo===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')
+    ? coordinators.map(c => `<option value="${c.id}" ${task.assignedTo === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')
     : '<option value="">No coordinators available</option>';
   const taskDbFileInputId = `task-db-file-${toDomSafeId(task.id)}`;
   const dbUploads = task.dbRequired && APP.user
@@ -1059,9 +1059,9 @@ function updateTaskAssignment(taskId, assignedTo, selectEl) {
   const previousAssignee = getCoordinator(task.assignedTo);
   task.assignedTo = assignedTo;
   task.timeline.unshift({
-    date: new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short'}),
+    date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
     title: 'Task Reassigned',
-    body: `Reassigned from ${previousAssignee.name || 'Unassigned'} to ${nextAssignee.name}.`,
+    body: `Reassigned from ${previousAssignee?.name || 'Unassigned'} to ${nextAssignee.name}.`,
     done: true
   });
   renderTasks(window._currentTaskFilter || 'all');
@@ -2539,8 +2539,8 @@ function renderSettings() {
         </div>
         <div class="form-row">
           <div class="form-group" style="flex:1">
-            <label class="form-label">Temporary Password</label>
-            <input class="form-input" type="text" value="${TEMP_PASSWORD}" readonly>
+            <label class="form-label" for="tm-password">Temporary Password</label>
+            <input class="form-input" id="tm-password" type="password" placeholder="Set temporary password for coordinator">
             <div class="text-muted text-sm mt-2">Coordinator must change this password on first login.</div>
           </div>
           <div class="form-group" style="align-self:flex-end">
@@ -2610,7 +2610,8 @@ function renderSettings() {
   window.addCoordinator = async () => {
     const name = document.getElementById('tm-name')?.value?.trim();
     const username = normalizeUsername(document.getElementById('tm-username')?.value);
-    if (!name || !username) {
+    const password = document.getElementById('tm-password')?.value || '';
+    if (!name || !username || !password) {
       alert('Please fill in all coordinator fields.');
       return;
     }
@@ -2619,7 +2620,7 @@ function renderSettings() {
       alert('That username is already in use.');
       return;
     }
-    const passwordHash = await hashPassword(TEMP_PASSWORD);
+    const passwordHash = await hashPassword(password);
     users.push({
       id: crypto.randomUUID(),
       name,
@@ -2630,7 +2631,7 @@ function renderSettings() {
       createdAt: new Date().toISOString()
     });
     saveUsers(users);
-    alert(`Coordinator created. Temporary password: ${TEMP_PASSWORD}`);
+    alert('Coordinator created with temporary password. They must change it on first login.');
     renderSettings();
   };
   window.removeCoordinator = (id) => {
