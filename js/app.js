@@ -2851,6 +2851,7 @@ function initApp() {
 
 // ── STARTUP ──
 document.addEventListener('DOMContentLoaded', async () => {
+  localStorage.removeItem('cp-users');
   console.log('APP INIT START');
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
