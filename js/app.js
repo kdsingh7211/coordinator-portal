@@ -965,6 +965,7 @@ function renderPoc() {
   const el = document.getElementById('page-poc');
   const isManager = APP.role === 'manager';
   const visiblePocs = getVisiblePocs();
+  const tableColspan = isManager ? 7 : 5;
   const otherManagers = getUsersByRole('manager').filter(m => m.id !== APP.user?.id);
 
   el.innerHTML = `
@@ -1062,7 +1063,7 @@ function renderPoc() {
               <th>Category</th>
               <th>Email</th>
               <th>Contact Number</th>
-              ${isManager ? '<th>Coordinator (if added by coordinator)</th><th>Added By</th>' : ''}
+              ${isManager ? '<th>Coordinator</th><th>Added By</th>' : ''}
             </tr>
           </thead>
           <tbody>
@@ -1078,7 +1079,7 @@ function renderPoc() {
                   <td>${escapeHtml(p.createdByName || '—')} <span class="text-muted text-sm">(${p.createdByRole === 'manager' ? 'Manager' : 'Coordinator'})</span></td>
                 ` : ''}
               </tr>
-            `).join('') : `<tr><td colspan="${isManager ? 7 : 5}"><div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">No POCs yet</div></div></td></tr>`}
+            `).join('') : `<tr><td colspan="${tableColspan}"><div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">No POCs yet</div></div></td></tr>`}
           </tbody>
         </table>
       </div>
