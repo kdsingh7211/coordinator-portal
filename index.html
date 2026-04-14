@@ -28,7 +28,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">Password</label>
-          <input class="form-input" id="login-password" type="password" autocomplete="current-password" placeholder="••••••••">
+          <input class="form-input" id="login-password" type="password" autocomplete="current-password" placeholder="••••••••" onchange="console.log('INPUT CHANGED:', JSON.stringify(this.value), 'id=', this.id)">
         </div>
       </div>
 
