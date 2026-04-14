@@ -47,7 +47,7 @@ const DATA = {
 const DB_STATUS_OPTIONS = ['Mail Sent', 'Replied', 'Denied', 'Accepted'];
 const TEMP_PASSWORD = 'E-Cell@2025';
 const STORAGE_RESET_VERSION_KEY = 'cp-storage-reset-version';
-const STORAGE_RESET_VERSION = '2026-04-13-auth-reset-1';
+const STORAGE_RESET_VERSION = '2026-04-14-auth-reset-2';
 
 // ── HELPERS ──
 async function hashPassword(password) {
@@ -69,7 +69,6 @@ function loadUsers() {
 function resetPersistedDataIfNeeded() {
   const version = localStorage.getItem(STORAGE_RESET_VERSION_KEY);
   if (version === STORAGE_RESET_VERSION) return;
-  localStorage.removeItem('cp-users');
   localStorage.removeItem('cp-theme');
   localStorage.removeItem('cp-sidebar-collapsed');
   sessionStorage.removeItem('cp-session');
@@ -2575,7 +2574,12 @@ function renderSettings() {
                     <tr>
                       <td>${c.name}</td>
                       <td class="mono text-sm">${c.username}</td>
-                      <td><button class="btn btn-ghost btn-sm" onclick="removeCoordinator('${c.id}')">Remove</button></td>
+                      <td>
+                        <div class="d-flex items-center" style="gap:var(--sp-2);flex-wrap:wrap">
+                          <button class="btn btn-ghost btn-sm" onclick="resetCoordinatorPassword('${c.id}')">Reset Password</button>
+                          <button class="btn btn-ghost btn-sm" onclick="removeCoordinator('${c.id}')">Remove</button>
+                        </div>
+                      </td>
                     </tr>
                   `).join('');
                 })()}
@@ -2652,6 +2656,26 @@ function renderSettings() {
     const next = users.filter(u => u.id !== id);
     saveUsers(next);
     renderSettings();
+  };
+  window.resetCoordinatorPassword = async (id) => {
+    const nextPassword = prompt('Enter new temporary password for this coordinator (minimum 8 characters):');
+    if (nextPassword === null) return;
+    const trimmedPassword = nextPassword.trim();
+    if (trimmedPassword.length < 8) {
+      alert('Temporary password must be at least 8 characters.');
+      return;
+    }
+    const users = loadUsers();
+    const idx = users.findIndex(u => u.id === id && u.role === 'coordinator');
+    if (idx === -1) {
+      alert('Coordinator not found.');
+      return;
+    }
+    users[idx].passwordHash = await hashPassword(trimmedPassword);
+    users[idx].mustChangePassword = true;
+    users[idx].updatedAt = new Date().toISOString();
+    saveUsers(users);
+    alert('Coordinator password reset. They must set a new password at next login.');
   };
 }
 
@@ -2858,8 +2882,6 @@ function initApp() {
 
 // ── STARTUP ──
 document.addEventListener('DOMContentLoaded', async () => {
-  // TODO(remove after first deploy with unified password hashing): force one-time user reseed.
-  localStorage.removeItem('cp-users');
   console.log('APP INIT START');
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
