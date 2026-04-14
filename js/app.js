@@ -2552,7 +2552,7 @@ function renderSettings() {
           <div class="form-group" style="flex:1">
             <label class="form-label" for="tm-password">Temporary Password</label>
             <input class="form-input" id="tm-password" type="password" placeholder="Set temporary password for coordinator">
-            <div class="text-muted text-sm mt-2">Coordinator must change this password on first login.</div>
+            <div class="text-muted text-sm mt-2">Used for adding or resetting a coordinator password. Coordinator must change it on first login.</div>
           </div>
           <div class="form-group" style="align-self:flex-end">
             <button class="btn btn-primary" onclick="addCoordinator()">Add Coordinator</button>
@@ -2658,11 +2658,9 @@ function renderSettings() {
     renderSettings();
   };
   window.resetCoordinatorPassword = async (id) => {
-    const nextPassword = prompt('Enter new temporary password for this coordinator (minimum 8 characters):');
-    if (nextPassword === null) return;
-    const trimmedPassword = nextPassword.trim();
+    const trimmedPassword = document.getElementById('tm-password')?.value?.trim() || '';
     if (trimmedPassword.length < 8) {
-      alert('Temporary password must be at least 8 characters.');
+      alert('Enter a temporary password (minimum 8 characters) in the Temporary Password field first.');
       return;
     }
     const users = loadUsers();
@@ -2675,6 +2673,8 @@ function renderSettings() {
     users[idx].mustChangePassword = true;
     users[idx].updatedAt = new Date().toISOString();
     saveUsers(users);
+    const tempPasswordInput = document.getElementById('tm-password');
+    if (tempPasswordInput) tempPasswordInput.value = '';
     alert('Coordinator password reset. They must set a new password at next login.');
   };
 }
