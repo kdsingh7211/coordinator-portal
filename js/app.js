@@ -2660,7 +2660,7 @@ function renderSettings() {
   window.resetCoordinatorPassword = async (id) => {
     const trimmedPassword = document.getElementById('tm-password')?.value?.trim() || '';
     if (trimmedPassword.length < 8) {
-      alert('Please enter a temporary password (minimum 8 characters).');
+      alert('Please enter a temporary password in the field above (minimum 8 characters).');
       return;
     }
     const users = loadUsers();
