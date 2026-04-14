@@ -2660,7 +2660,7 @@ function renderSettings() {
   window.resetCoordinatorPassword = async (id) => {
     const trimmedPassword = document.getElementById('tm-password')?.value?.trim() || '';
     if (trimmedPassword.length < 8) {
-      alert('Enter a temporary password (minimum 8 characters) in the Temporary Password field first.');
+      alert('Please enter a temporary password (minimum 8 characters).');
       return;
     }
     const users = loadUsers();
@@ -2675,7 +2675,7 @@ function renderSettings() {
     saveUsers(users);
     const tempPasswordInput = document.getElementById('tm-password');
     if (tempPasswordInput) tempPasswordInput.value = '';
-    alert('Coordinator password reset. They must set a new password at next login.');
+    alert('Success: Coordinator password reset. They must set a new password at next login.');
   };
 }
 
