@@ -18,6 +18,7 @@ const APP = {
   trackDbExpandedCoordinators: {},
   timelineTab: 'task',
   managerTimelineMessage: { type: '', text: '' },
+  firebaseDb: null,
 };
 
 // ── SEED DATA ──
@@ -47,7 +48,16 @@ const DATA = {
 const DB_STATUS_OPTIONS = ['Mail Sent', 'Replied', 'Denied', 'Accepted'];
 const TEMP_PASSWORD = 'E-Cell@2025';
 const STORAGE_RESET_VERSION_KEY = 'cp-storage-reset-version';
-const STORAGE_RESET_VERSION = '2026-04-13-auth-reset-1';
+const STORAGE_RESET_VERSION = '2026-04-14-auth-reset-2';
+const FIREBASE_USERS_PATH = 'cp-users';
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyAjB_KKDL_F_4nc6agyqINBe-e41JSXRb8',
+  authDomain: 'coordie-portal.firebaseapp.com',
+  projectId: 'coordie-portal',
+  storageBucket: 'coordie-portal.firebasestorage.app',
+  messagingSenderId: '552803820221',
+  appId: '1:552803820221:web:0dc5963eee88418c348dd4'
+};
 
 // ── HELPERS ──
 async function hashPassword(password) {
@@ -59,6 +69,9 @@ async function hashPassword(password) {
 }
 
 function loadUsers() {
+  if (Array.isArray(APP.users) && APP.users.length) {
+    return APP.users;
+  }
   try {
     return JSON.parse(localStorage.getItem('cp-users') || '[]');
   } catch {
@@ -66,10 +79,62 @@ function loadUsers() {
   }
 }
 
+function setUsersLocally(users) {
+  localStorage.setItem('cp-users', JSON.stringify(users));
+  APP.users = users;
+}
+
+function initFirebase() {
+  if (!window.firebase || typeof window.firebase.initializeApp !== 'function') {
+    return false;
+  }
+  if (!window.firebase.apps.length) {
+    window.firebase.initializeApp(FIREBASE_CONFIG);
+  }
+  APP.firebaseDb = window.firebase.database();
+  return true;
+}
+
+async function fetchUsersFromFirebase() {
+  if (!APP.firebaseDb) return null;
+  try {
+    const snapshot = await APP.firebaseDb.ref(FIREBASE_USERS_PATH).once('value');
+    const value = snapshot.val();
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'object') return Object.values(value).filter(Boolean);
+    return [];
+  } catch (error) {
+    console.warn('Failed to fetch users from Firebase. Falling back to local users.', error);
+    return null;
+  }
+}
+
+async function syncUsersFromFirebase() {
+  const remoteUsers = await fetchUsersFromFirebase();
+  if (!Array.isArray(remoteUsers)) return;
+  if (remoteUsers.length) {
+    setUsersLocally(remoteUsers);
+    return;
+  }
+  const localUsers = loadUsers();
+  if (localUsers.length) {
+    await persistUsersToFirebase(localUsers);
+  }
+}
+
+async function persistUsersToFirebase(users) {
+  if (!APP.firebaseDb) return;
+  try {
+    await APP.firebaseDb.ref(FIREBASE_USERS_PATH).set(users);
+  } catch (error) {
+    console.warn('Failed to save users to Firebase. Keeping local copy only.', error);
+  }
+}
+
 function resetPersistedDataIfNeeded() {
   const version = localStorage.getItem(STORAGE_RESET_VERSION_KEY);
   if (version === STORAGE_RESET_VERSION) return;
-  localStorage.removeItem('cp-users');
   localStorage.removeItem('cp-theme');
   localStorage.removeItem('cp-sidebar-collapsed');
   sessionStorage.removeItem('cp-session');
@@ -79,8 +144,8 @@ function resetPersistedDataIfNeeded() {
 }
 
 function saveUsers(users) {
-  localStorage.setItem('cp-users', JSON.stringify(users));
-  APP.users = users;
+  setUsersLocally(users);
+  void persistUsersToFirebase(users);
 }
 
 function normalizeUsername(username) {
@@ -2553,7 +2618,7 @@ function renderSettings() {
           <div class="form-group" style="flex:1">
             <label class="form-label" for="tm-password">Temporary Password</label>
             <input class="form-input" id="tm-password" type="password" placeholder="Set temporary password for coordinator">
-            <div class="text-muted text-sm mt-2">Coordinator must change this password on first login.</div>
+            <div class="text-muted text-sm mt-2">Used for adding or resetting a coordinator password. Coordinator must change it on first login.</div>
           </div>
           <div class="form-group" style="align-self:flex-end">
             <button class="btn btn-primary" onclick="addCoordinator()">Add Coordinator</button>
@@ -2575,7 +2640,12 @@ function renderSettings() {
                     <tr>
                       <td>${c.name}</td>
                       <td class="mono text-sm">${c.username}</td>
-                      <td><button class="btn btn-ghost btn-sm" onclick="removeCoordinator('${c.id}')">Remove</button></td>
+                      <td>
+                        <div class="d-flex items-center" style="gap:var(--sp-2);flex-wrap:wrap">
+                          <button class="btn btn-ghost btn-sm" onclick="resetCoordinatorPassword('${c.id}')">Reset Password</button>
+                          <button class="btn btn-ghost btn-sm" onclick="removeCoordinator('${c.id}')">Remove</button>
+                        </div>
+                      </td>
                     </tr>
                   `).join('');
                 })()}
@@ -2652,6 +2722,26 @@ function renderSettings() {
     const next = users.filter(u => u.id !== id);
     saveUsers(next);
     renderSettings();
+  };
+  window.resetCoordinatorPassword = async (id) => {
+    const trimmedPassword = document.getElementById('tm-password')?.value?.trim() || '';
+    if (trimmedPassword.length < 8) {
+      alert('Please enter a temporary password in the field above (minimum 8 characters).');
+      return;
+    }
+    const users = loadUsers();
+    const idx = users.findIndex(u => u.id === id && u.role === 'coordinator');
+    if (idx === -1) {
+      alert('Coordinator not found.');
+      return;
+    }
+    users[idx].passwordHash = await hashPassword(trimmedPassword);
+    users[idx].mustChangePassword = true;
+    users[idx].updatedAt = new Date().toISOString();
+    saveUsers(users);
+    const tempPasswordInput = document.getElementById('tm-password');
+    if (tempPasswordInput) tempPasswordInput.value = '';
+    alert('Success: Coordinator password reset. They must set a new password at next login.');
   };
 }
 
@@ -2858,8 +2948,6 @@ function initApp() {
 
 // ── STARTUP ──
 document.addEventListener('DOMContentLoaded', async () => {
-  // TODO(remove after first deploy with unified password hashing): force one-time user reseed.
-  localStorage.removeItem('cp-users');
   console.log('APP INIT START');
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
@@ -2871,6 +2959,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   resetPersistedDataIfNeeded();
   setTheme(APP.theme);
+  initFirebase();
+  await syncUsersFromFirebase();
   await ensureSeedManagers();
   APP.users = loadUsers();
   console.log('Stored users after seeding:', APP.users);
