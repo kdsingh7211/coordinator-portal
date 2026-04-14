@@ -18,6 +18,7 @@ const APP = {
   trackDbExpandedCoordinators: {},
   timelineTab: 'task',
   managerTimelineMessage: { type: '', text: '' },
+  firebaseDb: null,
 };
 
 // ── SEED DATA ──
@@ -48,6 +49,15 @@ const DB_STATUS_OPTIONS = ['Mail Sent', 'Replied', 'Denied', 'Accepted'];
 const TEMP_PASSWORD = 'E-Cell@2025';
 const STORAGE_RESET_VERSION_KEY = 'cp-storage-reset-version';
 const STORAGE_RESET_VERSION = '2026-04-14-auth-reset-2';
+const FIREBASE_USERS_PATH = 'cp-users';
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyAjB_KKDL_F_4nc6agyqINBe-e41JSXRb8',
+  authDomain: 'coordie-portal.firebaseapp.com',
+  projectId: 'coordie-portal',
+  storageBucket: 'coordie-portal.firebasestorage.app',
+  messagingSenderId: '552803820221',
+  appId: '1:552803820221:web:0dc5963eee88418c348dd4'
+};
 
 // ── HELPERS ──
 async function hashPassword(password) {
@@ -59,10 +69,66 @@ async function hashPassword(password) {
 }
 
 function loadUsers() {
+  if (Array.isArray(APP.users) && APP.users.length) {
+    return APP.users;
+  }
   try {
     return JSON.parse(localStorage.getItem('cp-users') || '[]');
   } catch {
     return [];
+  }
+}
+
+function setUsersLocally(users) {
+  localStorage.setItem('cp-users', JSON.stringify(users));
+  APP.users = users;
+}
+
+function initFirebase() {
+  if (!window.firebase || typeof window.firebase.initializeApp !== 'function') {
+    return false;
+  }
+  if (!window.firebase.apps.length) {
+    window.firebase.initializeApp(FIREBASE_CONFIG);
+  }
+  APP.firebaseDb = window.firebase.database();
+  return true;
+}
+
+async function fetchUsersFromFirebase() {
+  if (!APP.firebaseDb) return null;
+  try {
+    const snapshot = await APP.firebaseDb.ref(FIREBASE_USERS_PATH).once('value');
+    const value = snapshot.val();
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'object') return Object.values(value).filter(Boolean);
+    return [];
+  } catch (error) {
+    console.warn('Failed to fetch users from Firebase. Falling back to local users.', error);
+    return null;
+  }
+}
+
+async function syncUsersFromFirebase() {
+  const remoteUsers = await fetchUsersFromFirebase();
+  if (!Array.isArray(remoteUsers)) return;
+  if (remoteUsers.length) {
+    setUsersLocally(remoteUsers);
+    return;
+  }
+  const localUsers = loadUsers();
+  if (localUsers.length) {
+    await persistUsersToFirebase(localUsers);
+  }
+}
+
+async function persistUsersToFirebase(users) {
+  if (!APP.firebaseDb) return;
+  try {
+    await APP.firebaseDb.ref(FIREBASE_USERS_PATH).set(users);
+  } catch (error) {
+    console.warn('Failed to save users to Firebase. Keeping local copy only.', error);
   }
 }
 
@@ -78,8 +144,8 @@ function resetPersistedDataIfNeeded() {
 }
 
 function saveUsers(users) {
-  localStorage.setItem('cp-users', JSON.stringify(users));
-  APP.users = users;
+  setUsersLocally(users);
+  void persistUsersToFirebase(users);
 }
 
 function normalizeUsername(username) {
@@ -2893,6 +2959,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   resetPersistedDataIfNeeded();
   setTheme(APP.theme);
+  initFirebase();
+  await syncUsersFromFirebase();
   await ensureSeedManagers();
   APP.users = loadUsers();
   console.log('Stored users after seeding:', APP.users);
