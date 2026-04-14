@@ -2734,6 +2734,13 @@ function hydrateSession() {
 }
 
 async function handleSignIn() {
+  const rawPassword = document.getElementById('login-password')
+    ? document.getElementById('login-password').value
+    : 'ELEMENT NOT FOUND';
+
+  console.log('PASSWORD ELEMENT EXISTS:', !!document.getElementById('login-password'));
+  console.log('RAW PASSWORD:', JSON.stringify(rawPassword));
+  console.log('RAW LENGTH:', rawPassword.length);
   const username = normalizeUsername(document.getElementById('login-username')?.value);
   const password = document.getElementById('login-password')?.value || '';
   const enteredUsername = username;
