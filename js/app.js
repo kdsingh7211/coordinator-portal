@@ -2844,7 +2844,18 @@ async function handleSignIn() {
   const hash = await hashPassword(password);
   console.log('LOGIN: entered password hash =', hash);
   console.log('LOGIN: hash length =', hash.length);
-  const users = loadUsers();
+  let users = loadUsers();
+  if (!users || !users.length) {
+    try {
+      await syncUsersFromFirebase();
+      await ensureSeedManagers();
+      users = loadUsers();
+    } catch (error) {
+      console.error('LOGIN: failed to initialize users before sign-in', error);
+      setLoginError('Unable to load users. Please try again in a moment.');
+      return;
+    }
+  }
   console.log('LOGIN: all users in localStorage =', JSON.stringify(users, null, 2));
   const user = users.find(u => u.username === username && u.passwordHash === hash);
   console.log('LOGIN RESULT: user found =', user ? user.name : 'NOT FOUND');
