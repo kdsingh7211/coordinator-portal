@@ -54,6 +54,7 @@ const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyAjB_KKDL_F_4nc6agyqINBe-e41JSXRb8',
   authDomain: 'coordie-portal.firebaseapp.com',
   projectId: 'coordie-portal',
+  databaseURL: 'https://coordie-portal-default-rtdb.firebaseio.com',
   storageBucket: 'coordie-portal.firebasestorage.app',
   messagingSenderId: '552803820221',
   appId: '1:552803820221:web:0dc5963eee88418c348dd4'
@@ -88,17 +89,30 @@ function initFirebase() {
   if (!window.firebase || typeof window.firebase.initializeApp !== 'function') {
     return false;
   }
-  if (!window.firebase.apps.length) {
-    window.firebase.initializeApp(FIREBASE_CONFIG);
+  try {
+    if (!window.firebase.apps.length) {
+      window.firebase.initializeApp(FIREBASE_CONFIG);
+    }
+    APP.firebaseDb = window.firebase.database();
+    return true;
+  } catch (error) {
+    console.warn('Failed to initialize Firebase Realtime Database.', error);
+    APP.firebaseDb = null;
+    return false;
   }
-  APP.firebaseDb = window.firebase.database();
-  return true;
+}
+
+function getFirebaseDb() {
+  if (APP.firebaseDb) return APP.firebaseDb;
+  if (initFirebase()) return APP.firebaseDb;
+  return null;
 }
 
 async function fetchUsersFromFirebase() {
-  if (!APP.firebaseDb) return null;
+  const db = getFirebaseDb();
+  if (!db) return null;
   try {
-    const snapshot = await APP.firebaseDb.ref(FIREBASE_USERS_PATH).once('value');
+    const snapshot = await db.ref(FIREBASE_USERS_PATH).once('value');
     const value = snapshot.val();
     if (!value) return [];
     if (Array.isArray(value)) return value.filter(Boolean);
@@ -124,9 +138,10 @@ async function syncUsersFromFirebase() {
 }
 
 async function persistUsersToFirebase(users) {
-  if (!APP.firebaseDb) return;
+  const db = getFirebaseDb();
+  if (!db) return;
   try {
-    await APP.firebaseDb.ref(FIREBASE_USERS_PATH).set(users);
+    await db.ref(FIREBASE_USERS_PATH).set(users);
   } catch (error) {
     console.warn('Failed to save users to Firebase. Keeping local copy only.', error);
   }
