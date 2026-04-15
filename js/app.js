@@ -2867,7 +2867,7 @@ async function handleSignIn() {
       users = loadUsers();
     } catch (error) {
       console.error('LOGIN: failed to initialize users before sign-in', error);
-      setLoginError('Unable to load users. Please try again in a moment.');
+      setLoginError('Failed to initialize users. Please try again in a moment.');
       return;
     }
   }
