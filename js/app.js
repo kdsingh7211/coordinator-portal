@@ -56,11 +56,15 @@ const FIREBASE_CONFIG = {
   projectId: 'coordie-portal',
   storageBucket: 'coordie-portal.firebasestorage.app',
   messagingSenderId: '552803820221',
-  appId: '1:552803820221:web:0dc5963eee88418c348dd4'
+  appId: '1:552803820221:web:0dc5963eee88418c348dd4',
+  databaseURL: 'https://coordie-portal-default-rtdb.asia-southeast1.firebasedatabase.app/'
 };
 
 // ── HELPERS ──
 async function hashPassword(password) {
+  if (!crypto.subtle) {
+    throw new Error('Password hashing requires a secure context (HTTPS or localhost).');
+  }
   const encoder = new TextEncoder();
   const data = encoder.encode(password);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -199,7 +203,6 @@ function getCoordinatorStats(userId) {
 }
 
 async function ensureSeedManagers() {
-  console.log('SEEDING: starting seed function');
   const existing = loadUsers();
   const hasValidManagers = existing.some(u =>
     u.role === 'manager' &&
@@ -210,14 +213,11 @@ async function ensureSeedManagers() {
     APP.users = existing;
     return;
   }
-  console.log('SEEDING: hashing password...');
   const hash = await hashPassword(TEMP_PASSWORD);
-  console.log('SEEDING: hash result =', hash);
-  console.log('SEEDING: hash length =', hash.length);
   const now = new Date().toISOString();
   const seedManagers = [
     {
-      id: crypto.randomUUID(),
+      id: createId('user'),
       name: 'Chetan Jangid',
       username: 'chetan',
       passwordHash: hash,
@@ -226,7 +226,7 @@ async function ensureSeedManagers() {
       createdAt: now
     },
     {
-      id: crypto.randomUUID(),
+      id: createId('user'),
       name: 'Karandeep Singh',
       username: 'karandeep',
       passwordHash: hash,
@@ -236,9 +236,10 @@ async function ensureSeedManagers() {
     }
   ];
   const nonManagerUsers = existing.filter(u => u.role !== 'manager');
-  saveUsers([...nonManagerUsers, ...seedManagers]);
-  const saved = JSON.parse(localStorage.getItem('cp-users') || '[]');
-  console.log('SEEDING: saved users in localStorage =', JSON.stringify(saved, null, 2));
+  const nextUsers = [...nonManagerUsers, ...seedManagers];
+  saveUsers(nextUsers);
+  APP.users = loadUsers();
+  console.log('SEEDING: seeded managers:', seedManagers.map(u => u.username));
 }
 function calcTaskProgress(task) {
   const subs = task.subtasks;
@@ -2824,28 +2825,22 @@ function hydrateSession() {
 }
 
 async function handleSignIn() {
-  const rawPassword = document.getElementById('login-password')
-    ? document.getElementById('login-password').value
-    : 'ELEMENT NOT FOUND';
-
-  console.log('PASSWORD ELEMENT EXISTS:', !!document.getElementById('login-password'));
-  console.log('RAW PASSWORD:', JSON.stringify(rawPassword));
-  console.log('RAW LENGTH:', rawPassword.length);
   const username = normalizeUsername(document.getElementById('login-username')?.value);
   const password = document.getElementById('login-password')?.value || '';
-  const enteredUsername = username;
-  console.log('LOGIN ATTEMPT: username =', enteredUsername);
+  console.log('LOGIN ATTEMPT: username =', username);
   if (!username || !password) {
     setLoginError('Enter both username and password.');
     return;
   }
-
-  console.log('LOGIN: hashing entered password...');
-  const hash = await hashPassword(password);
-  console.log('LOGIN: entered password hash =', hash);
-  console.log('LOGIN: hash length =', hash.length);
+  let hash;
+  try {
+    hash = await hashPassword(password);
+  } catch (err) {
+    setLoginError(err.message || 'Password hashing failed. Please use HTTPS or localhost.');
+    return;
+  }
   const users = loadUsers();
-  console.log('LOGIN: all users in localStorage =', JSON.stringify(users, null, 2));
+  console.log('LOGIN: available usernames =', users.map(u => u.username));
   const user = users.find(u => u.username === username && u.passwordHash === hash);
   console.log('LOGIN RESULT: user found =', user ? user.name : 'NOT FOUND');
   if (!user) {
@@ -2959,11 +2954,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   resetPersistedDataIfNeeded();
   setTheme(APP.theme);
-  initFirebase();
-  await syncUsersFromFirebase();
+  try {
+    initFirebase();
+    await syncUsersFromFirebase();
+  } catch (err) {
+    console.warn('Firebase init/sync failed. Continuing with local users.', err);
+  }
   await ensureSeedManagers();
   APP.users = loadUsers();
-  console.log('Stored users after seeding:', APP.users);
+  console.log('APP INIT: users loaded =', APP.users.length);
   hydrateSession();
 
   if (APP.role && APP.user) {
