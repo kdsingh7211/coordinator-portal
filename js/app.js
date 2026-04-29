@@ -63,7 +63,7 @@ const FIREBASE_CONFIG = {
 // ── HELPERS ──
 async function hashPassword(password) {
   if (!crypto.subtle) {
-    throw new Error('Password hashing requires HTTPS, localhost, or 127.0.0.1.');
+    throw new Error('Password hashing requires a secure context (HTTPS or localhost).');
   }
   const encoder = new TextEncoder();
   const data = encoder.encode(password);
