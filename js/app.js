@@ -2824,7 +2824,7 @@ function hydrateSession() {
     try {
       const legacy = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
       if (legacy) {
-        legacy.expiresAt = legacy.expiresAt || getSessionExpiry();
+        legacy.expiresAt = getSessionExpiry();
         localStorage.setItem(SESSION_KEY, JSON.stringify(legacy));
         sessionStorage.removeItem(SESSION_KEY);
         session = legacy;
