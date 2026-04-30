@@ -49,6 +49,8 @@ const DB_STATUS_OPTIONS = ['Mail Sent', 'Replied', 'Denied', 'Accepted'];
 const TEMP_PASSWORD = 'E-Cell@2025';
 const STORAGE_RESET_VERSION_KEY = 'cp-storage-reset-version';
 const STORAGE_RESET_VERSION = '2026-04-14-auth-reset-2';
+const SESSION_KEY = 'cp-session';
+const SESSION_TTL_DAYS = 7;
 const FIREBASE_USERS_PATH = 'cp-users';
 const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyAjB_KKDL_F_4nc6agyqINBe-e41JSXRb8',
@@ -61,6 +63,10 @@ const FIREBASE_CONFIG = {
 };
 
 // ── HELPERS ──
+function getSessionExpiry() {
+  return Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
+}
+
 async function hashPassword(password) {
   if (!crypto.subtle) {
     throw new Error('Password hashing requires a secure context (HTTPS or localhost).');
@@ -141,7 +147,7 @@ function resetPersistedDataIfNeeded() {
   if (version === STORAGE_RESET_VERSION) return;
   localStorage.removeItem('cp-theme');
   localStorage.removeItem('cp-sidebar-collapsed');
-  sessionStorage.removeItem('cp-session');
+  sessionStorage.removeItem(SESSION_KEY);
   localStorage.setItem(STORAGE_RESET_VERSION_KEY, STORAGE_RESET_VERSION);
   APP.theme = 'light';
   APP.sidebarCollapsed = false;
@@ -2678,11 +2684,12 @@ function renderSettings() {
     }
     APP.user.name = name;
     APP.user.initials = getInitials(name);
-    sessionStorage.setItem('cp-session', JSON.stringify({
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
       userId: APP.user.id,
       role: APP.role,
       name: APP.user.name,
-      initials: APP.user.initials
+      initials: APP.user.initials,
+      expiresAt: getSessionExpiry()
     }));
     alert('Profile saved!');
   };
@@ -2777,7 +2784,8 @@ async function handleLogin() {
 }
 
 function logout() {
-  sessionStorage.removeItem('cp-session');
+  localStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_KEY); // cleanup for old sessions
   APP.role = null; APP.user = null; APP.passwordChangeUserId = null;
   document.getElementById('app').style.display = 'none';
   document.getElementById('login-page').style.display = 'flex';
@@ -2805,16 +2813,41 @@ function setLoginError(message) {
 function hydrateSession() {
   let session = null;
   try {
-    session = JSON.parse(sessionStorage.getItem('cp-session') || 'null');
+    session = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
   } catch (error) {
     console.warn('Invalid session data detected. Clearing stored session.', error);
-    sessionStorage.removeItem('cp-session');
+    localStorage.removeItem(SESSION_KEY);
   }
+
+  // Backward compatibility: migrate old sessionStorage session to localStorage
+  if (!session) {
+    try {
+      const legacy = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
+      if (legacy) {
+        legacy.expiresAt = getSessionExpiry();
+        localStorage.setItem(SESSION_KEY, JSON.stringify(legacy));
+        sessionStorage.removeItem(SESSION_KEY);
+        session = legacy;
+      }
+    } catch (e) {
+      sessionStorage.removeItem(SESSION_KEY);
+    }
+  }
+
   if (!session) {
     APP.role = null;
     APP.user = null;
     return;
   }
+
+  if (!session.expiresAt || Date.now() > session.expiresAt) {
+    console.warn('Session expired. Logging out.');
+    localStorage.removeItem(SESSION_KEY);
+    APP.role = null;
+    APP.user = null;
+    return;
+  }
+
   APP.role = session.role;
   APP.user = {
     id: session.userId,
@@ -2902,9 +2935,10 @@ function createSession(user) {
     userId: user.id,
     role: user.role,
     name: user.name,
-    initials: getInitials(user.name)
+    initials: getInitials(user.name),
+    expiresAt: getSessionExpiry()
   };
-  sessionStorage.setItem('cp-session', JSON.stringify(session));
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   APP.role = user.role;
   APP.user = {
     id: user.id,
