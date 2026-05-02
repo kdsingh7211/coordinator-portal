@@ -52,6 +52,8 @@ const STORAGE_RESET_VERSION = '2026-04-14-auth-reset-2';
 const SESSION_KEY = 'cp-session';
 const SESSION_TTL_DAYS = 7;
 const FIREBASE_USERS_PATH = 'cp-users';
+const TASKS_STORAGE_KEY = 'cp-tasks';
+const FIREBASE_TASKS_PATH = 'cp-tasks';
 const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyAjB_KKDL_F_4nc6agyqINBe-e41JSXRb8',
   authDomain: 'coordie-portal.firebaseapp.com',
@@ -139,6 +141,70 @@ async function persistUsersToFirebase(users) {
     await APP.firebaseDb.ref(FIREBASE_USERS_PATH).set(users);
   } catch (error) {
     console.warn('Failed to save users to Firebase. Keeping local copy only.', error);
+  }
+}
+
+function loadTasks() {
+  try {
+    return JSON.parse(localStorage.getItem(TASKS_STORAGE_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function setTasksLocally(tasks) {
+  DATA.tasks = Array.isArray(tasks) ? tasks : [];
+  localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(DATA.tasks));
+}
+
+async function fetchTasksFromFirebase() {
+  if (!APP.firebaseDb) return null;
+  try {
+    const snapshot = await APP.firebaseDb.ref(FIREBASE_TASKS_PATH).once('value');
+    const value = snapshot.val();
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'object') return Object.values(value).filter(Boolean);
+    return [];
+  } catch (error) {
+    console.warn('Failed to fetch tasks from Firebase. Falling back to local tasks.', error);
+    return null;
+  }
+}
+
+async function persistTasksToFirebase(tasks) {
+  if (!APP.firebaseDb) return;
+  try {
+    await APP.firebaseDb.ref(FIREBASE_TASKS_PATH).set(tasks);
+  } catch (error) {
+    console.warn('Failed to save tasks to Firebase. Keeping local copy only.', error);
+  }
+}
+
+function saveTasks() {
+  localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(DATA.tasks));
+  void persistTasksToFirebase(DATA.tasks);
+}
+
+async function syncTasksFromFirebase() {
+  try {
+    const remoteTasks = await fetchTasksFromFirebase();
+    if (Array.isArray(remoteTasks) && remoteTasks.length) {
+      setTasksLocally(remoteTasks);
+      console.log('Tasks loaded from Firebase:', remoteTasks.length);
+      return;
+    }
+    const localTasks = loadTasks();
+    if (localTasks.length) {
+      setTasksLocally(localTasks);
+      await persistTasksToFirebase(localTasks);
+      console.log('Local tasks pushed to Firebase:', localTasks.length);
+      return;
+    }
+    setTasksLocally([]);
+  } catch (error) {
+    console.warn('Task sync failed. Loading local tasks only.', error);
+    setTasksLocally(loadTasks());
   }
 }
 
@@ -1106,6 +1172,7 @@ function updateSubtask(taskId, subId, val) {
   if (!task) return;
   const sub = task.subtasks.find(s => s.id === subId);
   if (sub) sub.value = parseFloat(val) || 0;
+  if (sub) saveTasks();
 }
 
 function updateTaskStatus(taskId, status, selectEl) {
@@ -1124,6 +1191,7 @@ function updateTaskStatus(taskId, status, selectEl) {
     return;
   }
   task.status = status;
+  saveTasks();
   addNotification(`Task "${escapeHtml(task.name)}" status changed to ${status}.`, { browser: true });
   renderTasks(window._currentTaskFilter || 'all');
   renderDashboard();
@@ -1143,6 +1211,7 @@ function updateTaskAssignment(taskId, assignedTo, selectEl) {
   }
   const previousAssignee = getCoordinator(task.assignedTo);
   task.assignedTo = assignedTo;
+  console.log('Assigned task to coordinator id:', assignedTo);
   task.timeline.unshift({
     date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
     title: 'Task Reassigned',
@@ -1150,6 +1219,7 @@ function updateTaskAssignment(taskId, assignedTo, selectEl) {
     done: true
   });
   addNotification(`Task "${escapeHtml(task.name)}" reassigned to ${escapeHtml(nextAssignee.name)}.`, { browser: true });
+  saveTasks();
   renderTasks(window._currentTaskFilter || 'all');
   renderDashboard();
   openTaskDetail(taskId);
@@ -1174,6 +1244,7 @@ async function uploadTaskDbCsv(taskId) {
     sourceTaskId: task.id
   });
   if (!ok) return;
+  saveTasks();
   if (fileInput) fileInput.value = '';
   addNotification(`DB CSV uploaded for task "${escapeHtml(task.name)}".`, { browser: true });
   alert('DB CSV uploaded successfully.');
@@ -1195,6 +1266,7 @@ function addComment(taskId) {
     initials: APP.user?.initials || 'YO',
     text, time: 'Just now'
   });
+  saveTasks();
   input.value = '';
   // Re-render comment list
   const list = document.getElementById(`comment-list-${taskId}`);
@@ -1356,6 +1428,7 @@ function saveNewTask() {
     timeline: [{ date: new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short'}), title: 'Task Created', body: 'Task has been created and assigned', done: true }]
   };
   DATA.tasks.unshift(newTask);
+  saveTasks();
   closeModal('new-task-modal');
   addNotification(`Task created: "${escapeHtml(newTask.name)}"`, { browser: true });
   renderTasks();
@@ -1421,6 +1494,7 @@ function openEditTaskModal(taskId) {
     task.status = document.getElementById('nt-status')?.value;
     task.deadline = document.getElementById('nt-deadline')?.value;
     task.dbRequired = !!document.getElementById('nt-db-required')?.checked;
+    saveTasks();
     closeModal('new-task-modal');
     renderTasks();
   };
@@ -1431,6 +1505,7 @@ function deleteTask(taskId) {
   if (!confirm('Delete this task? This cannot be undone.')) return;
   const idx = DATA.tasks.findIndex(t => t.id === taskId);
   if (idx !== -1) DATA.tasks.splice(idx, 1);
+  saveTasks();
   renderTasks();
   renderDashboard();
 }
@@ -3073,6 +3148,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   await ensureSeedManagers();
   APP.users = loadUsers();
   console.log('APP INIT: users loaded =', APP.users.length);
+  await syncTasksFromFirebase();
+  console.log('Tasks available:', DATA.tasks.length);
   hydrateSession();
 
   if (APP.role && APP.user) {
