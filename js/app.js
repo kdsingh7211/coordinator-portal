@@ -1124,6 +1124,7 @@ function updateTaskStatus(taskId, status, selectEl) {
     return;
   }
   task.status = status;
+  addNotification(`Task "${escapeHtml(task.name)}" status changed to ${status}.`, { browser: true });
   renderTasks(window._currentTaskFilter || 'all');
   renderDashboard();
 }
@@ -1148,6 +1149,7 @@ function updateTaskAssignment(taskId, assignedTo, selectEl) {
     body: `Reassigned from ${previousAssignee?.name || 'Unassigned'} to ${nextAssignee.name}.`,
     done: true
   });
+  addNotification(`Task "${escapeHtml(task.name)}" reassigned to ${escapeHtml(nextAssignee.name)}.`, { browser: true });
   renderTasks(window._currentTaskFilter || 'all');
   renderDashboard();
   openTaskDetail(taskId);
@@ -1173,6 +1175,7 @@ async function uploadTaskDbCsv(taskId) {
   });
   if (!ok) return;
   if (fileInput) fileInput.value = '';
+  addNotification(`DB CSV uploaded for task "${escapeHtml(task.name)}".`, { browser: true });
   alert('DB CSV uploaded successfully.');
   openTaskDetail(task.id);
 }
@@ -1354,6 +1357,7 @@ function saveNewTask() {
   };
   DATA.tasks.unshift(newTask);
   closeModal('new-task-modal');
+  addNotification(`Task created: "${escapeHtml(newTask.name)}"`, { browser: true });
   renderTasks();
   renderDashboard();
 }
@@ -1472,6 +1476,7 @@ async function uploadManagerTimelineCsv() {
   }
   DATA.managerTimeline.push(...entries);
   setManagerTimelineMessage(`${entries.length} timeline entr${entries.length === 1 ? 'y' : 'ies'} added.`, 'success');
+  addNotification(`Manager timeline CSV uploaded: ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} added.`, { browser: true });
   renderTimeline();
 }
 
@@ -2319,6 +2324,7 @@ async function uploadTrackDbCsv() {
   const ok = await importDbCsvFile(file, { coordinatorId, coordinatorName, sourceTaskId: '' });
   if (!ok) return;
   if (fileInput) fileInput.value = '';
+  addNotification('Track DB CSV uploaded successfully.', { browser: true });
   alert('CSV uploaded successfully.');
   renderTrackDb();
 }
@@ -2604,6 +2610,13 @@ function renderSettings() {
             <div class="toggle ${on?'on':''}" onclick="this.classList.toggle('on')"></div>
           </div>
         `).join('')}
+        <div class="d-flex items-center mt-4" style="justify-content:space-between;padding-top:var(--sp-3);border-top:1px solid var(--border)">
+          <div>
+            <div class="fw-500">Browser Notifications</div>
+            <div class="text-muted text-sm">Receive native browser/device notifications</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="requestNotificationPermission()">Enable Notifications</button>
+        </div>
       </div>
     </div>
 
@@ -2975,6 +2988,69 @@ function initApp() {
   navigate('dashboard');
 }
 
+// ── BROWSER NOTIFICATIONS ──
+function requestNotificationPermission() {
+  if (!('Notification' in window)) {
+    alert('Browser notifications are not supported in this browser.');
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    showBrowserNotification('CoordPortal notifications enabled', {
+      body: "You'll receive important portal updates here."
+    });
+    return;
+  }
+  if (Notification.permission === 'denied') {
+    alert('Notifications are blocked. Please enable them in your browser settings.');
+    return;
+  }
+  Notification.requestPermission().then(permission => {
+    if (permission === 'granted') {
+      showBrowserNotification('CoordPortal notifications enabled', {
+        body: "You'll receive important portal updates here."
+      });
+    }
+  });
+}
+
+function showBrowserNotification(title, options = {}) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const opts = {
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    ...options
+  };
+  if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.ready.then(reg => {
+      reg.showNotification(title, opts);
+    }).catch(() => {
+      new Notification(title, opts);
+    });
+  } else {
+    try { new Notification(title, opts); } catch (err) { console.warn('Browser notification failed:', err); }
+  }
+}
+
+function addNotification(text, options = {}) {
+  DATA.notifications.unshift({
+    id: createId('notif'),
+    text,
+    time: options.time || 'Just now',
+    read: false,
+    type: options.type || 'info'
+  });
+
+  renderNotifPanel();
+
+  if (APP.currentPage === 'notifications') {
+    renderNotifications();
+  }
+
+  if (options.browser === true) {
+    showBrowserNotification('CoordPortal', { body: text });
+  }
+}
+
 // ── STARTUP ──
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('APP INIT START');
@@ -3018,4 +3094,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('notif-panel').classList.remove('open');
     }
   });
+
+  // Register service worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(err => {
+      console.warn('Service worker registration failed:', err);
+    });
+  }
 });
