@@ -59,6 +59,138 @@ const FIREBASE_CONFIG = {
   appId: '1:552803820221:web:0dc5963eee88418c348dd4'
 };
 
+// ── DATA PERSISTENCE ──
+const DATA_STORAGE_KEYS = {
+  tasks: 'cp-tasks',
+  managerTimeline: 'cp-manager-timeline',
+  pocs: 'cp-pocs',
+  dbCompanies: 'cp-db-companies',
+  notifications: 'cp-notifications',
+  categories: 'cp-categories',
+  resources: 'cp-resources'
+};
+
+const FIREBASE_DATA_PATHS = {
+  tasks: 'cp-tasks',
+  managerTimeline: 'cp-manager-timeline',
+  pocs: 'cp-pocs',
+  dbCompanies: 'cp-db-companies',
+  notifications: 'cp-notifications',
+  categories: 'cp-categories',
+  resources: 'cp-resources'
+};
+
+function loadLocalDataCollection(key) {
+  const storageKey = DATA_STORAGE_KEYS[key];
+  if (!storageKey) return null;
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (error) {
+    console.warn(`Failed to load ${key} from localStorage.`, error);
+    return null;
+  }
+}
+
+function setDataCollectionLocally(key, items) {
+  const storageKey = DATA_STORAGE_KEYS[key];
+  if (!storageKey) return;
+  DATA[key] = Array.isArray(items) ? items : [];
+  localStorage.setItem(storageKey, JSON.stringify(DATA[key]));
+}
+
+async function fetchDataCollectionFromFirebase(key) {
+  if (!APP.firebaseDb) return null;
+  const path = FIREBASE_DATA_PATHS[key];
+  if (!path) return null;
+  try {
+    const snapshot = await APP.firebaseDb.ref(path).once('value');
+    const value = snapshot.val();
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'object') return Object.values(value).filter(Boolean);
+    return [];
+  } catch (error) {
+    console.warn(`Failed to fetch ${key} from Firebase. Falling back to local data.`, error);
+    return null;
+  }
+}
+
+async function persistDataCollectionToFirebase(key) {
+  if (!APP.firebaseDb) return;
+  const path = FIREBASE_DATA_PATHS[key];
+  if (!path) return;
+  try {
+    await APP.firebaseDb.ref(path).set(DATA[key] || []);
+  } catch (error) {
+    console.warn(`Failed to save ${key} to Firebase. Keeping local copy only.`, error);
+  }
+}
+
+function saveDataCollection(key) {
+  const storageKey = DATA_STORAGE_KEYS[key];
+  if (!storageKey) return;
+  if (!Array.isArray(DATA[key])) DATA[key] = [];
+  localStorage.setItem(storageKey, JSON.stringify(DATA[key]));
+  void persistDataCollectionToFirebase(key);
+}
+
+async function syncDataCollection(key) {
+  try {
+    const remoteItems = await fetchDataCollectionFromFirebase(key);
+    if (Array.isArray(remoteItems) && remoteItems.length) {
+      setDataCollectionLocally(key, remoteItems);
+      console.log(`${key} loaded from Firebase:`, remoteItems.length);
+      return;
+    }
+    const localItems = loadLocalDataCollection(key);
+    if (Array.isArray(localItems) && localItems.length) {
+      setDataCollectionLocally(key, localItems);
+      await persistDataCollectionToFirebase(key);
+      console.log(`${key} loaded locally and pushed to Firebase:`, localItems.length);
+      return;
+    }
+    if (Array.isArray(DATA[key]) && DATA[key].length) {
+      localStorage.setItem(DATA_STORAGE_KEYS[key], JSON.stringify(DATA[key]));
+      await persistDataCollectionToFirebase(key);
+      console.log(`${key} defaults saved:`, DATA[key].length);
+      return;
+    }
+    setDataCollectionLocally(key, []);
+  } catch (error) {
+    console.warn(`Sync failed for ${key}. Loading local data if available.`, error);
+    const localItems = loadLocalDataCollection(key);
+    if (Array.isArray(localItems)) {
+      setDataCollectionLocally(key, localItems);
+    }
+  }
+}
+
+async function syncAllAppData() {
+  const keys = [
+    'tasks',
+    'managerTimeline',
+    'pocs',
+    'dbCompanies',
+    'notifications',
+    'categories',
+    'resources'
+  ];
+  for (const key of keys) {
+    await syncDataCollection(key);
+  }
+}
+
+function saveTasks() { saveDataCollection('tasks'); }
+function saveDbCompanies() { saveDataCollection('dbCompanies'); }
+function savePocs() { saveDataCollection('pocs'); }
+function saveManagerTimeline() { saveDataCollection('managerTimeline'); }
+function saveNotifications() { saveDataCollection('notifications'); }
+function saveCategories() { saveDataCollection('categories'); }
+function saveResources() { saveDataCollection('resources'); }
+
 // ── HELPERS ──
 async function hashPassword(password) {
   const encoder = new TextEncoder();
@@ -663,10 +795,12 @@ function renderNotifPanel() {
 function markRead(id) {
   const n = DATA.notifications.find(x => x.id === id);
   if (n) n.read = true;
+  saveNotifications();
   renderNotifPanel();
 }
 function markAllRead() {
   DATA.notifications.forEach(n => n.read = true);
+  saveNotifications();
   renderNotifPanel();
 }
 
@@ -1099,6 +1233,7 @@ function updateSubtask(taskId, subId, val) {
   if (!task) return;
   const sub = task.subtasks.find(s => s.id === subId);
   if (sub) sub.value = parseFloat(val) || 0;
+  saveTasks();
 }
 
 function updateTaskStatus(taskId, status, selectEl) {
@@ -1117,6 +1252,7 @@ function updateTaskStatus(taskId, status, selectEl) {
     return;
   }
   task.status = status;
+  saveTasks();
   renderTasks(window._currentTaskFilter || 'all');
   renderDashboard();
 }
@@ -1141,6 +1277,7 @@ function updateTaskAssignment(taskId, assignedTo, selectEl) {
     body: `Reassigned from ${previousAssignee?.name || 'Unassigned'} to ${nextAssignee.name}.`,
     done: true
   });
+  saveTasks();
   renderTasks(window._currentTaskFilter || 'all');
   renderDashboard();
   openTaskDetail(taskId);
@@ -1165,6 +1302,7 @@ async function uploadTaskDbCsv(taskId) {
     sourceTaskId: task.id
   });
   if (!ok) return;
+  saveDbCompanies();
   if (fileInput) fileInput.value = '';
   alert('DB CSV uploaded successfully.');
   openTaskDetail(task.id);
@@ -1186,6 +1324,7 @@ function addComment(taskId) {
     text, time: 'Just now'
   });
   input.value = '';
+  saveTasks();
   // Re-render comment list
   const list = document.getElementById(`comment-list-${taskId}`);
   if (list) {
@@ -1229,6 +1368,7 @@ function addTaskCategory() {
     return;
   }
   DATA.categories.push(name);
+  saveCategories();
   refreshTaskCategorySelect(name);
 }
 
@@ -1249,6 +1389,8 @@ function renameTaskCategory() {
   DATA.tasks.forEach(t => {
     if (sameCategory(t.category, current)) t.category = next;
   });
+  saveCategories();
+  saveTasks();
   refreshTaskCategorySelect(next);
 }
 
@@ -1267,6 +1409,8 @@ function deleteTaskCategory() {
   DATA.tasks.forEach(t => {
     if (sameCategory(t.category, current)) t.category = 'Uncategorized';
   });
+  saveCategories();
+  saveTasks();
   refreshTaskCategorySelect('Uncategorized');
 }
 
@@ -1346,6 +1490,7 @@ function saveNewTask() {
     timeline: [{ date: new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short'}), title: 'Task Created', body: 'Task has been created and assigned', done: true }]
   };
   DATA.tasks.unshift(newTask);
+  saveTasks();
   closeModal('new-task-modal');
   renderTasks();
   renderDashboard();
@@ -1410,6 +1555,7 @@ function openEditTaskModal(taskId) {
     task.status = document.getElementById('nt-status')?.value;
     task.deadline = document.getElementById('nt-deadline')?.value;
     task.dbRequired = !!document.getElementById('nt-db-required')?.checked;
+    saveTasks();
     closeModal('new-task-modal');
     renderTasks();
   };
@@ -1420,6 +1566,7 @@ function deleteTask(taskId) {
   if (!confirm('Delete this task? This cannot be undone.')) return;
   const idx = DATA.tasks.findIndex(t => t.id === taskId);
   if (idx !== -1) DATA.tasks.splice(idx, 1);
+  saveTasks();
   renderTasks();
   renderDashboard();
 }
@@ -1464,6 +1611,7 @@ async function uploadManagerTimelineCsv() {
     return;
   }
   DATA.managerTimeline.push(...entries);
+  saveManagerTimeline();
   setManagerTimelineMessage(`${entries.length} timeline entr${entries.length === 1 ? 'y' : 'ies'} added.`, 'success');
   renderTimeline();
 }
@@ -1477,6 +1625,7 @@ function addManagerTimelineItem() {
     comments: '',
     completed: false
   });
+  saveManagerTimeline();
   setManagerTimelineMessage('', '');
   renderTimeline();
 }
@@ -1488,11 +1637,13 @@ function updateManagerTimelineField(id, field, value) {
   switch (field) {
     case 'deadline':
       item.deadline = normalizeDateForInput(value);
+      saveManagerTimeline();
       renderTimeline();
       return;
     case 'task':
     case 'comments':
       item[field] = String(value || '');
+      saveManagerTimeline();
       renderTimeline();
       return;
     default:
@@ -1509,6 +1660,7 @@ function toggleManagerTimelineCompleted(id, completed) {
   const item = DATA.managerTimeline.find(entry => entry.id === id);
   if (!item) return;
   item.completed = !!completed;
+  saveManagerTimeline();
   renderTimeline();
 }
 
@@ -1521,6 +1673,7 @@ function deleteManagerTimelineItem(id) {
   const idx = DATA.managerTimeline.findIndex(entry => entry.id === id);
   if (idx === -1) return;
   DATA.managerTimeline.splice(idx, 1);
+  saveManagerTimeline();
   setManagerTimelineMessage('', '');
   renderTimeline();
 }
@@ -1845,6 +1998,7 @@ function saveResource() {
       url
     });
   }
+  saveResources();
   closeModal('resource-modal');
   APP.editingResourceId = null;
   renderResources();
@@ -1855,6 +2009,7 @@ function deleteResource(resourceId) {
   if (!confirm('Delete this resource?')) return;
   const idx = DATA.resources.findIndex(r => r.id === resourceId);
   if (idx !== -1) DATA.resources.splice(idx, 1);
+  saveResources();
   renderResources();
 }
 
