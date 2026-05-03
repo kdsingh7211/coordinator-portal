@@ -1,8 +1,8 @@
 // ===========================
-// SERVICE WORKER — CoordPortal
+// SERVICE WORKER — Eureka! Workplace
 // ===========================
 
-const CACHE_NAME = 'coordportal-v3';
+const CACHE_NAME = 'eureka-workplace-v3';
 const ASSETS = [
   '/',
   '/index.html',
@@ -73,9 +73,9 @@ self.addEventListener('push', event => {
   try {
     data = event.data ? event.data.json() : {};
   } catch {
-    data = { title: 'CoordPortal', body: event.data ? event.data.text() : 'New notification' };
+    data = { title: 'Eureka! Workplace', body: event.data ? event.data.text() : 'New notification' };
   }
-  const title = data.title || 'CoordPortal';
+  const title = data.title || 'Eureka! Workplace';
   const options = {
     body: data.body || 'You have a new notification',
     icon: 'icons/icon-192.png',

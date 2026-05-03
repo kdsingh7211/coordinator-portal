@@ -1,7 +1,7 @@
 {
-  "name": "Coordinator Portal",
-  "short_name": "CoordPortal",
-  "description": "Task management portal for coordinators and managers",
+  "name": "Eureka! Workplace",
+  "short_name": "Eureka!",
+  "description": "Eureka! Workplace — Task management portal by E-Cell IIT Bombay",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

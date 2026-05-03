@@ -6,10 +6,10 @@
   <meta name="theme-color" content="#1A1916">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="CoordPortal">
-  <meta name="description" content="Coordinator Portal — Task management for teams">
+  <meta name="apple-mobile-web-app-title" content="Eureka!">
+  <meta name="description" content="Eureka! Workplace — Task management for teams by E-Cell IIT Bombay">
   <link rel="manifest" href="./manifest.json">
-  <title>Coordinator Portal</title>
+  <title>Eureka! Workplace</title>
   <link rel="stylesheet" href="./css/style.css">
 </head>
 <body>
@@ -17,8 +17,13 @@
 <!-- ─── LOGIN PAGE ─── -->
 <div id="login-page" class="login-page">
   <div class="login-card">
-    <div class="login-logo">⚡ CoordPortal</div>
-    <div class="login-sub">Task management for coordinators and managers.</div>
+    <div class="login-logo">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="icons/logo-white.svg">
+        <img src="icons/logo-black.svg" alt="Eureka! Workplace" class="login-logo-img">
+      </picture>
+    </div>
+    <div class="login-sub">Eureka! Workplace — Task management by E-Cell IIT Bombay.</div>
 
     <form id="login-form">
       <div id="login-step1">
@@ -57,8 +62,11 @@
   <!-- ─── SIDEBAR ─── -->
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-logo">
-      <div class="logo-mark">C</div>
-      <div class="logo-text">CoordPortal</div>
+      <picture class="sidebar-logo-picture">
+        <source media="(prefers-color-scheme: dark)" srcset="icons/logo-white.svg">
+        <img src="icons/logo-black.svg" alt="Eureka! Workplace" class="sidebar-logo-img">
+      </picture>
+      <div class="logo-text">Eureka!</div>
     </div>
 
     <nav class="sidebar-nav">
