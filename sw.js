@@ -2,7 +2,7 @@
 // SERVICE WORKER — CoordPortal
 // ===========================
 
-const CACHE_NAME = 'coordportal-v2';
+const CACHE_NAME = 'coordportal-v3';
 const ASSETS = [
   '/',
   '/index.html',

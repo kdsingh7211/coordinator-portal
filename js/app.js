@@ -54,6 +54,27 @@ const SESSION_TTL_DAYS = 7;
 const FIREBASE_USERS_PATH = 'cp-users';
 const TASKS_STORAGE_KEY = 'cp-tasks';
 const FIREBASE_TASKS_PATH = 'cp-tasks';
+
+const DATA_STORAGE_KEYS = {
+  tasks: 'cp-tasks',
+  managerTimeline: 'cp-manager-timeline',
+  pocs: 'cp-pocs',
+  dbCompanies: 'cp-db-companies',
+  notifications: 'cp-notifications',
+  categories: 'cp-categories',
+  resources: 'cp-resources'
+};
+
+const FIREBASE_DATA_PATHS = {
+  tasks: 'cp-tasks',
+  managerTimeline: 'cp-manager-timeline',
+  pocs: 'cp-pocs',
+  dbCompanies: 'cp-db-companies',
+  notifications: 'cp-notifications',
+  categories: 'cp-categories',
+  resources: 'cp-resources'
+};
+const MAX_NOTIFICATIONS = 100;
 const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyAjB_KKDL_F_4nc6agyqINBe-e41JSXRb8',
   authDomain: 'coordie-portal.firebaseapp.com',
@@ -181,32 +202,113 @@ async function persistTasksToFirebase(tasks) {
   }
 }
 
-function saveTasks() {
-  localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(DATA.tasks));
-  void persistTasksToFirebase(DATA.tasks);
+async function syncTasksFromFirebase() {
+  await syncDataCollection('tasks');
 }
 
-async function syncTasksFromFirebase() {
+// ── GENERIC PERSISTENCE HELPERS ──
+function loadLocalDataCollection(key) {
+  const storageKey = DATA_STORAGE_KEYS[key];
+  if (!storageKey) return null;
   try {
-    const remoteTasks = await fetchTasksFromFirebase();
-    if (Array.isArray(remoteTasks) && remoteTasks.length) {
-      setTasksLocally(remoteTasks);
-      console.log('Tasks loaded from Firebase:', remoteTasks.length);
-      return;
-    }
-    const localTasks = loadTasks();
-    if (localTasks.length) {
-      setTasksLocally(localTasks);
-      await persistTasksToFirebase(localTasks);
-      console.log('Local tasks pushed to Firebase:', localTasks.length);
-      return;
-    }
-    setTasksLocally([]);
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
   } catch (error) {
-    console.warn('Task sync failed. Loading local tasks only.', error);
-    setTasksLocally(loadTasks());
+    console.warn(`Failed to load ${key} from localStorage.`, error);
+    return null;
   }
 }
+
+function setDataCollectionLocally(key, items) {
+  const storageKey = DATA_STORAGE_KEYS[key];
+  if (!storageKey) return;
+  DATA[key] = Array.isArray(items) ? items : [];
+  localStorage.setItem(storageKey, JSON.stringify(DATA[key]));
+}
+
+async function fetchDataCollectionFromFirebase(key) {
+  if (!APP.firebaseDb) return null;
+  const path = FIREBASE_DATA_PATHS[key];
+  if (!path) return null;
+  try {
+    const snapshot = await APP.firebaseDb.ref(path).once('value');
+    const value = snapshot.val();
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'object') return Object.values(value).filter(Boolean);
+    return [];
+  } catch (error) {
+    console.warn(`Failed to fetch ${key} from Firebase. Falling back to local data.`, error);
+    return null;
+  }
+}
+
+async function persistDataCollectionToFirebase(key) {
+  if (!APP.firebaseDb) return;
+  const path = FIREBASE_DATA_PATHS[key];
+  if (!path) return;
+  try {
+    await APP.firebaseDb.ref(path).set(DATA[key] || []);
+  } catch (error) {
+    console.warn(`Failed to save ${key} to Firebase. Keeping local copy only.`, error);
+  }
+}
+
+function saveDataCollection(key) {
+  const storageKey = DATA_STORAGE_KEYS[key];
+  if (!storageKey) return;
+  if (!Array.isArray(DATA[key])) DATA[key] = [];
+  localStorage.setItem(storageKey, JSON.stringify(DATA[key]));
+  void persistDataCollectionToFirebase(key);
+}
+
+async function syncDataCollection(key) {
+  try {
+    const remoteItems = await fetchDataCollectionFromFirebase(key);
+    if (Array.isArray(remoteItems) && remoteItems.length) {
+      setDataCollectionLocally(key, remoteItems);
+      console.log(`${key} loaded from Firebase:`, remoteItems.length);
+      return;
+    }
+    const localItems = loadLocalDataCollection(key);
+    if (Array.isArray(localItems) && localItems.length) {
+      setDataCollectionLocally(key, localItems);
+      await persistDataCollectionToFirebase(key);
+      console.log(`${key} loaded locally and pushed to Firebase:`, localItems.length);
+      return;
+    }
+    if (Array.isArray(DATA[key]) && DATA[key].length) {
+      localStorage.setItem(DATA_STORAGE_KEYS[key], JSON.stringify(DATA[key]));
+      await persistDataCollectionToFirebase(key);
+      console.log(`${key} defaults saved:`, DATA[key].length);
+      return;
+    }
+    setDataCollectionLocally(key, []);
+  } catch (error) {
+    console.warn(`Sync failed for ${key}. Loading local data if available.`, error);
+    const localItems = loadLocalDataCollection(key);
+    if (Array.isArray(localItems)) {
+      setDataCollectionLocally(key, localItems);
+    }
+  }
+}
+
+async function syncAllAppData() {
+  for (const key of Object.keys(DATA_STORAGE_KEYS)) {
+    await syncDataCollection(key);
+  }
+}
+
+// ── PERSISTENCE WRAPPERS ──
+function saveTasks() { saveDataCollection('tasks'); }
+function saveDbCompanies() { saveDataCollection('dbCompanies'); }
+function savePocs() { saveDataCollection('pocs'); }
+function saveManagerTimeline() { saveDataCollection('managerTimeline'); }
+function saveNotifications() { saveDataCollection('notifications'); }
+function saveCategories() { saveDataCollection('categories'); }
+function saveResources() { saveDataCollection('resources'); }
 
 function resetPersistedDataIfNeeded() {
   const version = localStorage.getItem(STORAGE_RESET_VERSION_KEY);
@@ -736,10 +838,12 @@ function renderNotifPanel() {
 function markRead(id) {
   const n = DATA.notifications.find(x => x.id === id);
   if (n) n.read = true;
+  saveNotifications();
   renderNotifPanel();
 }
 function markAllRead() {
   DATA.notifications.forEach(n => n.read = true);
+  saveNotifications();
   renderNotifPanel();
 }
 
@@ -1245,6 +1349,7 @@ async function uploadTaskDbCsv(taskId) {
   });
   if (!ok) return;
   saveTasks();
+  saveDbCompanies();
   if (fileInput) fileInput.value = '';
   addNotification(`DB CSV uploaded for task "${escapeHtml(task.name)}".`, { browser: true });
   alert('DB CSV uploaded successfully.');
@@ -1311,6 +1416,7 @@ function addTaskCategory() {
     return;
   }
   DATA.categories.push(name);
+  saveCategories();
   refreshTaskCategorySelect(name);
 }
 
@@ -1331,6 +1437,8 @@ function renameTaskCategory() {
   DATA.tasks.forEach(t => {
     if (sameCategory(t.category, current)) t.category = next;
   });
+  saveCategories();
+  saveTasks();
   refreshTaskCategorySelect(next);
 }
 
@@ -1349,6 +1457,8 @@ function deleteTaskCategory() {
   DATA.tasks.forEach(t => {
     if (sameCategory(t.category, current)) t.category = 'Uncategorized';
   });
+  saveCategories();
+  saveTasks();
   refreshTaskCategorySelect('Uncategorized');
 }
 
@@ -1550,6 +1660,7 @@ async function uploadManagerTimelineCsv() {
     return;
   }
   DATA.managerTimeline.push(...entries);
+  saveManagerTimeline();
   setManagerTimelineMessage(`${entries.length} timeline entr${entries.length === 1 ? 'y' : 'ies'} added.`, 'success');
   addNotification(`Manager timeline CSV uploaded: ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} added.`, { browser: true });
   renderTimeline();
@@ -1564,6 +1675,7 @@ function addManagerTimelineItem() {
     comments: '',
     completed: false
   });
+  saveManagerTimeline();
   setManagerTimelineMessage('', '');
   renderTimeline();
 }
@@ -1575,11 +1687,13 @@ function updateManagerTimelineField(id, field, value) {
   switch (field) {
     case 'deadline':
       item.deadline = normalizeDateForInput(value);
+      saveManagerTimeline();
       renderTimeline();
       return;
     case 'task':
     case 'comments':
       item[field] = String(value || '');
+      saveManagerTimeline();
       renderTimeline();
       return;
     default:
@@ -1596,6 +1710,7 @@ function toggleManagerTimelineCompleted(id, completed) {
   const item = DATA.managerTimeline.find(entry => entry.id === id);
   if (!item) return;
   item.completed = !!completed;
+  saveManagerTimeline();
   renderTimeline();
 }
 
@@ -1608,6 +1723,7 @@ function deleteManagerTimelineItem(id) {
   const idx = DATA.managerTimeline.findIndex(entry => entry.id === id);
   if (idx === -1) return;
   DATA.managerTimeline.splice(idx, 1);
+  saveManagerTimeline();
   setManagerTimelineMessage('', '');
   renderTimeline();
 }
@@ -1934,6 +2050,7 @@ function saveResource() {
   }
   closeModal('resource-modal');
   APP.editingResourceId = null;
+  saveResources();
   renderResources();
 }
 
@@ -1942,6 +2059,7 @@ function deleteResource(resourceId) {
   if (!confirm('Delete this resource?')) return;
   const idx = DATA.resources.findIndex(r => r.id === resourceId);
   if (idx !== -1) DATA.resources.splice(idx, 1);
+  saveResources();
   renderResources();
 }
 
@@ -2139,6 +2257,7 @@ function renderPoc() {
       sharedManagerIds,
       createdAt: new Date().toISOString()
     });
+    savePocs();
     renderPoc();
   };
 }
@@ -2164,6 +2283,7 @@ function editPocEntry(pocId) {
   entry.category = category;
   entry.email = String(email || '').trim();
   entry.contact = String(contact || '').trim();
+  savePocs();
   renderPoc();
 }
 
@@ -2178,6 +2298,7 @@ function deletePocEntry(pocId) {
   if (!canManagePocEntry(entry)) return;
   if (!confirm('Delete this POC?')) return;
   DATA.pocs.splice(idx, 1);
+  savePocs();
   renderPoc();
 }
 
@@ -2398,6 +2519,7 @@ async function uploadTrackDbCsv() {
   }
   const ok = await importDbCsvFile(file, { coordinatorId, coordinatorName, sourceTaskId: '' });
   if (!ok) return;
+  saveDbCompanies();
   if (fileInput) fileInput.value = '';
   addNotification('Track DB CSV uploaded successfully.', { browser: true });
   alert('CSV uploaded successfully.');
@@ -2409,6 +2531,7 @@ function updateDbCompanyComment(companyId, value) {
   if (!entry || !canEditDbEntry(entry)) return;
   entry.comment = String(value || '').trim();
   entry.updatedAt = new Date().toISOString();
+  saveDbCompanies();
 }
 
 function updateDbCompanyCommentByEncoded(encodedCompanyId, value) {
@@ -2437,6 +2560,7 @@ async function promptAndCreatePocForDbCompany(entry) {
     sharedManagerIds: [],
     createdAt: new Date().toISOString()
   });
+  savePocs();
   return pocId;
 }
 
@@ -2456,6 +2580,7 @@ async function updateDbCompanyStatus(companyId, status) {
   }
   entry.status = status;
   entry.updatedAt = new Date().toISOString();
+  saveDbCompanies();
   if (prevStatus !== status) renderTrackDb();
 }
 
@@ -2486,6 +2611,7 @@ async function editDbCompanyEntry(companyId) {
   entry.comment = String(commentInput || '').trim();
   entry.updatedAt = new Date().toISOString();
   await updateDbCompanyStatus(companyId, status);
+  saveDbCompanies();
   renderTrackDb();
 }
 
@@ -2500,6 +2626,7 @@ function deleteDbCompanyEntry(companyId) {
   if (!canEditDbEntry(entry)) return;
   if (!confirm('Delete this Track DB entry?')) return;
   DATA.dbCompanies.splice(idx, 1);
+  saveDbCompanies();
   renderTrackDb();
 }
 
@@ -3114,6 +3241,8 @@ function addNotification(text, options = {}) {
     read: false,
     type: options.type || 'info'
   });
+  DATA.notifications = DATA.notifications.slice(0, MAX_NOTIFICATIONS);
+  saveNotifications();
 
   renderNotifPanel();
 
@@ -3148,7 +3277,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await ensureSeedManagers();
   APP.users = loadUsers();
   console.log('APP INIT: users loaded =', APP.users.length);
-  await syncTasksFromFirebase();
+  await syncAllAppData();
   console.log('Tasks available:', DATA.tasks.length);
   hydrateSession();
 
