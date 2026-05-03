@@ -74,6 +74,7 @@ const FIREBASE_DATA_PATHS = {
   categories: 'cp-categories',
   resources: 'cp-resources'
 };
+const MAX_NOTIFICATIONS = 100;
 const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyAjB_KKDL_F_4nc6agyqINBe-e41JSXRb8',
   authDomain: 'coordie-portal.firebaseapp.com',
@@ -295,8 +296,7 @@ async function syncDataCollection(key) {
 }
 
 async function syncAllAppData() {
-  const keys = ['tasks', 'managerTimeline', 'pocs', 'dbCompanies', 'notifications', 'categories', 'resources'];
-  for (const key of keys) {
+  for (const key of Object.keys(DATA_STORAGE_KEYS)) {
     await syncDataCollection(key);
   }
 }
@@ -3241,7 +3241,7 @@ function addNotification(text, options = {}) {
     read: false,
     type: options.type || 'info'
   });
-  DATA.notifications = DATA.notifications.slice(0, 100);
+  DATA.notifications = DATA.notifications.slice(0, MAX_NOTIFICATIONS);
   saveNotifications();
 
   renderNotifPanel();
