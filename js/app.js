@@ -1,5 +1,5 @@
 /* ===========================
-   COORDINATOR PORTAL — APP JS
+   EUREKA! WORKPLACE — APP JS
    =========================== */
 
 // ── APP STATE ──
@@ -750,6 +750,9 @@ function setTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
   localStorage.setItem('cp-theme', t);
   document.getElementById('theme-toggle-icon').textContent = t === 'dark' ? '☀️' : '🌙';
+  // Swap logos for light/dark mode
+  const logoSrc = t === 'dark' ? 'icons/logo-white.svg' : 'icons/logo-black.svg';
+  document.querySelectorAll('.login-logo-img, .sidebar-logo-img').forEach(el => el.src = logoSrc);
 }
 
 // ── SIDEBAR ──
@@ -3197,7 +3200,7 @@ function requestNotificationPermission() {
     return;
   }
   if (Notification.permission === 'granted') {
-    showBrowserNotification('CoordPortal notifications enabled', {
+    showBrowserNotification('Eureka! Workplace notifications enabled', {
       body: "You'll receive important portal updates here."
     });
     return;
@@ -3208,7 +3211,7 @@ function requestNotificationPermission() {
   }
   Notification.requestPermission().then(permission => {
     if (permission === 'granted') {
-      showBrowserNotification('CoordPortal notifications enabled', {
+      showBrowserNotification('Eureka! Workplace notifications enabled', {
         body: "You'll receive important portal updates here."
       });
     }
@@ -3251,7 +3254,7 @@ function addNotification(text, options = {}) {
   }
 
   if (options.browser === true) {
-    showBrowserNotification('CoordPortal', { body: text });
+    showBrowserNotification('Eureka! Workplace', { body: text });
   }
 }
 

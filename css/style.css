@@ -1,5 +1,5 @@
 /* ===========================
-   COORDINATOR PORTAL — STYLES
+   EUREKA! WORKPLACE — STYLES
    Clean. Functional. Elegant.
    =========================== */
 
@@ -160,11 +160,8 @@ ul { list-style: none; }
   min-height: var(--topbar-h);
   flex-shrink: 0;
 }
-.sidebar-logo .logo-mark {
-  width: 32px; height: 32px; border-radius: var(--r-sm);
-  background: var(--accent); display: grid; place-items: center;
-  flex-shrink: 0; font-size: 16px; font-weight: 600; color: #fff;
-}
+.sidebar-logo-picture { flex-shrink: 0; }
+.sidebar-logo-img { width: 32px; height: 32px; object-fit: contain; display: block; }
 .sidebar-logo .logo-text {
   font-size: 13px; font-weight: 600; color: var(--sidebar-text-active);
   white-space: nowrap; overflow: hidden; opacity: 1;
@@ -590,7 +587,8 @@ tbody tr:hover { background: var(--bg-raised); }
   border-radius: var(--r-xl); padding: var(--sp-8);
   width: 100%; max-width: 400px; box-shadow: var(--shadow-lg);
 }
-.login-logo { font-size: 28px; font-weight: 700; margin-bottom: var(--sp-2); }
+.login-logo { margin-bottom: var(--sp-4); display: flex; justify-content: center; }
+.login-logo-img { height: 110px; width: auto; object-fit: contain; }
 .login-sub { font-size: 13px; color: var(--text-secondary); margin-bottom: var(--sp-8); }
 .role-cards { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-6); }
 .role-card {
