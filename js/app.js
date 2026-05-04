@@ -1683,27 +1683,29 @@ function openEditTaskModal(taskId) {
     </div>`}
   `;
   document.getElementById('save-new-task-btn').onclick = () => {
-    const origCategory = task.category;
-    task.name = document.getElementById('nt-name')?.value?.trim() || task.name;
-    task.category = document.getElementById('nt-cat')?.value;
-    task.assignedTo = document.getElementById('nt-assign')?.value;
-    task.status = document.getElementById('nt-status')?.value;
-    task.deadline = document.getElementById('nt-deadline')?.value;
-    task.dbRequired = !!document.getElementById('nt-db-required')?.checked;
-    if (task.category === 'Database Work') {
+    const newName = document.getElementById('nt-name')?.value?.trim() || task.name;
+    const newCategory = document.getElementById('nt-cat')?.value;
+    const newAssignedTo = document.getElementById('nt-assign')?.value;
+    const newStatus = document.getElementById('nt-status')?.value;
+    const newDeadline = document.getElementById('nt-deadline')?.value;
+    const newDbRequired = !!document.getElementById('nt-db-required')?.checked;
+    if (newCategory === 'Database Work') {
       const newSubCat = document.getElementById('nt-db-sub-category')?.value;
       if (newSubCat && newSubCat !== task.dbSubCategory) {
         if (Array.isArray(task.dbEntities) && task.dbEntities.length) {
-          if (!confirm('Changing sub-category may affect existing DB entries. Continue?')) {
-            task.category = origCategory;
-            return;
-          }
+          if (!confirm('Changing sub-category may affect existing DB entries. Continue?')) return;
         }
         task.dbSubCategory = newSubCat;
       }
       task.dbWorkflowEnabled = true;
       if (!Array.isArray(task.dbEntities)) task.dbEntities = [];
     }
+    task.name = newName;
+    task.category = newCategory;
+    task.assignedTo = newAssignedTo;
+    task.status = newStatus;
+    task.deadline = newDeadline;
+    task.dbRequired = newDbRequired;
     saveTasks();
     closeModal('new-task-modal');
     renderTasks();
@@ -3521,7 +3523,7 @@ function findExistingDbEmailConflicts(contacts, context = {}) {
     const e = normalizeEmail(c.email);
     if (existingEmails.has(e)) {
       const ex = existingEmails.get(e);
-      conflicts.push({ email: c.email, existingCompany: ex.company, existingCoordinator: ex.coordinatorName, existingTask: getTaskNameById(ex.sourceTaskId) });
+      conflicts.push({ email: c.email, existingCompany: ex.company, existingCoordinator: ex.coordinatorName, existingTaskId: ex.sourceTaskId, existingTask: getTaskNameById(ex.sourceTaskId) });
     }
   });
   return conflicts;
@@ -3833,7 +3835,7 @@ async function addDbEntityToTask(encodedTaskId) {
     subCategory: task.dbSubCategory || '',
     sourceTaskId: task.id,
     coordinatorId: task.assignedTo || APP.user.id,
-    coordinatorName: isManager ? (getCoordinator(task.assignedTo)?.name || '') : (APP.user.name || ''),
+    coordinatorName: isManager ? (getCoordinator(task.assignedTo)?.name || APP.user.name || '') : (APP.user.name || ''),
     createdBy: APP.user.id,
     createdByName: APP.user.name,
     createdAt: new Date().toISOString(),
