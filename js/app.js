@@ -26,6 +26,17 @@ const DATA = {
   coordinators: [],
   categories: ['Incubators', 'Startups', 'Email Outreach', 'Database Work', 'Events', 'Research'],
   pocCategories: ['Incentive Partner', 'Investor', 'Mentor', 'Corporate'],
+  dbSubCategories: [
+    'Incentive Partner',
+    'Government Partner',
+    'Venture Capitalist',
+    'Incubator',
+    'Accelerator',
+    'Media Partner',
+    'Corporate Partner',
+    'Mentor',
+    'Other'
+  ],
   tasks: [],
   managerTimeline: [],
   pocs: [],
@@ -62,7 +73,8 @@ const DATA_STORAGE_KEYS = {
   dbCompanies: 'cp-db-companies',
   notifications: 'cp-notifications',
   categories: 'cp-categories',
-  resources: 'cp-resources'
+  resources: 'cp-resources',
+  dbSubCategories: 'cp-db-sub-categories',
 };
 
 const FIREBASE_DATA_PATHS = {
@@ -72,7 +84,8 @@ const FIREBASE_DATA_PATHS = {
   dbCompanies: 'cp-db-companies',
   notifications: 'cp-notifications',
   categories: 'cp-categories',
-  resources: 'cp-resources'
+  resources: 'cp-resources',
+  dbSubCategories: 'cp-db-sub-categories',
 };
 const MAX_NOTIFICATIONS = 100;
 const FIREBASE_CONFIG = {
@@ -309,6 +322,7 @@ function saveManagerTimeline() { saveDataCollection('managerTimeline'); }
 function saveNotifications() { saveDataCollection('notifications'); }
 function saveCategories() { saveDataCollection('categories'); }
 function saveResources() { saveDataCollection('resources'); }
+function saveDbSubCategories() { saveDataCollection('dbSubCategories'); }
 
 function resetPersistedDataIfNeeded() {
   const version = localStorage.getItem(STORAGE_RESET_VERSION_KEY);
@@ -718,7 +732,11 @@ function hasDbUploadForTask(taskId, coordinatorId) {
 function shouldBlockTaskCompletion(task, status, isAssignedCoordinator, userId) {
   if (status !== 'Done') return false;
   if (!isAssignedCoordinator) return false;
-  if (!task?.dbRequired) return false;
+  if (!task?.dbRequired && !isDatabaseWorkTask(task)) return false;
+  if (isDatabaseWorkTask(task)) {
+    const hasUpload = DATA.dbCompanies.some(e => e.sourceTaskId === task.id && e.coordinatorId === userId && Array.isArray(e.contacts) && e.contacts.length > 0);
+    return !hasUpload;
+  }
   return !hasDbUploadForTask(task.id, userId);
 }
 
@@ -1203,6 +1221,8 @@ function openTaskDetail(taskId) {
       </div>
     ` : ''}
 
+    ${isDatabaseWorkTask(task) ? renderDatabaseWorkSection(task) : ''}
+
     <hr class="divider">
     <div class="fw-600 mb-4" style="font-size:14px">📊 Sub-tasks & Metrics</div>
     <div class="table-wrap">
@@ -1293,7 +1313,11 @@ function updateTaskStatus(taskId, status, selectEl) {
     return;
   }
   if (shouldBlockTaskCompletion(task, status, isAssignedCoordinator, APP.user.id)) {
-    alert('This task requires DB upload. Please upload a CSV (Name, Email, Company) in the DB Upload Required section before marking it Done.');
+    if (isDatabaseWorkTask(task)) {
+      alert('This Database Work task requires at least one Stage 2 CSV upload before marking it Done.');
+    } else {
+      alert('This task requires DB upload. Please upload a CSV (Name, Email, Company) in the DB Upload Required section before marking it Done.');
+    }
     if (selectEl) selectEl.value = prevStatus;
     return;
   }
@@ -1516,8 +1540,40 @@ function openNewTaskModal() {
         <span>DB required (coordinator must upload CSV: Name, Email, Company before marking Done)</span>
       </label>
     </div>
+    <div id="db-work-settings" style="display:none;margin-top:var(--sp-3);padding:var(--sp-3);border:1px solid var(--border);border-radius:var(--radius)">
+      <div class="text-sm fw-500 mb-2">🗂️ Database Work Settings</div>
+      <div class="form-group">
+        <label class="form-label d-flex items-center" style="justify-content:space-between;gap:8px">
+          <span>Sub-Category</span>
+          ${APP.role === 'manager' ? `<span class="d-flex gap-2">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="addDbSubCategory()">＋</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="renameDbSubCategory()">✏️</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="deleteDbSubCategory()">🗑️</button>
+          </span>` : ''}
+        </label>
+        <select class="form-select" id="nt-db-sub-category">
+          ${renderDbSubCategoryOptions(DATA.dbSubCategories[0] || 'Other')}
+        </select>
+      </div>
+      <div class="text-sm text-muted mt-2">This task will use Stage 1 entity selection and Stage 2 contact CSV upload.</div>
+    </div>
   `;
   openModal('new-task-modal');
+  const catSelect = document.getElementById('nt-cat');
+  if (catSelect) {
+    catSelect.addEventListener('change', () => {
+      const dbBlock = document.getElementById('db-work-settings');
+      if (dbBlock) dbBlock.style.display = catSelect.value === 'Database Work' ? '' : 'none';
+      const dbReqCheckbox = document.getElementById('nt-db-required');
+      if (catSelect.value === 'Database Work' && dbReqCheckbox) dbReqCheckbox.checked = true;
+    });
+    if (catSelect.value === 'Database Work') {
+      const dbBlock = document.getElementById('db-work-settings');
+      if (dbBlock) dbBlock.style.display = '';
+      const dbReqCheckbox = document.getElementById('nt-db-required');
+      if (dbReqCheckbox) dbReqCheckbox.checked = true;
+    }
+  }
 }
 
 function saveNewTask() {
@@ -1541,6 +1597,13 @@ function saveNewTask() {
     timeline: [{ date: new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short'}), title: 'Task Created', body: 'Task has been created and assigned', done: true }]
   };
   DATA.tasks.unshift(newTask);
+  if (newTask.category === 'Database Work') {
+    newTask.dbWorkflowEnabled = true;
+    newTask.dbSubCategory = document.getElementById('nt-db-sub-category')?.value || (DATA.dbSubCategories[0] || 'Other');
+    newTask.dbStage = 1;
+    newTask.dbEntities = [];
+    newTask.dbRequired = true;
+  }
   saveTasks();
   closeModal('new-task-modal');
   addNotification(`Task created: "${escapeHtml(newTask.name)}"`, { browser: true });
@@ -1599,6 +1662,25 @@ function openEditTaskModal(taskId) {
         <span>DB required (coordinator must upload CSV: Name, Email, Company before marking Done)</span>
       </label>
     </div>
+    ${task.category === 'Database Work' ? `
+    <div id="db-work-settings" style="margin-top:var(--sp-3);padding:var(--sp-3);border:1px solid var(--border);border-radius:var(--radius)">
+      <div class="text-sm fw-500 mb-2">🗂️ Database Work Settings</div>
+      <div class="form-group">
+        <label class="form-label">Sub-Category</label>
+        <select class="form-select" id="nt-db-sub-category">
+          ${renderDbSubCategoryOptions(task.dbSubCategory || '')}
+        </select>
+      </div>
+    </div>
+    ` : `<div id="db-work-settings" style="display:none;margin-top:var(--sp-3);padding:var(--sp-3);border:1px solid var(--border);border-radius:var(--radius)">
+      <div class="text-sm fw-500 mb-2">🗂️ Database Work Settings</div>
+      <div class="form-group">
+        <label class="form-label">Sub-Category</label>
+        <select class="form-select" id="nt-db-sub-category">
+          ${renderDbSubCategoryOptions(DATA.dbSubCategories[0] || 'Other')}
+        </select>
+      </div>
+    </div>`}
   `;
   document.getElementById('save-new-task-btn').onclick = () => {
     task.name = document.getElementById('nt-name')?.value?.trim() || task.name;
@@ -1607,11 +1689,38 @@ function openEditTaskModal(taskId) {
     task.status = document.getElementById('nt-status')?.value;
     task.deadline = document.getElementById('nt-deadline')?.value;
     task.dbRequired = !!document.getElementById('nt-db-required')?.checked;
+    if (task.category === 'Database Work') {
+      const newSubCat = document.getElementById('nt-db-sub-category')?.value;
+      if (newSubCat && newSubCat !== task.dbSubCategory) {
+        if (Array.isArray(task.dbEntities) && task.dbEntities.length) {
+          if (!confirm('Changing sub-category may affect existing DB entries. Continue?')) {
+            task.category = document.getElementById('nt-cat')?.value;
+            return;
+          }
+        }
+        task.dbSubCategory = newSubCat;
+      }
+      task.dbWorkflowEnabled = true;
+      if (!Array.isArray(task.dbEntities)) task.dbEntities = [];
+    }
     saveTasks();
     closeModal('new-task-modal');
     renderTasks();
   };
   openModal('new-task-modal');
+  const catSelect = document.getElementById('nt-cat');
+  if (catSelect) {
+    catSelect.addEventListener('change', () => {
+      const dbBlock = document.getElementById('db-work-settings');
+      if (dbBlock) dbBlock.style.display = catSelect.value === 'Database Work' ? '' : 'none';
+      const dbReqCheckbox = document.getElementById('nt-db-required');
+      if (catSelect.value === 'Database Work' && dbReqCheckbox) dbReqCheckbox.checked = true;
+    });
+    if (catSelect.value === 'Database Work') {
+      const dbBlock = document.getElementById('db-work-settings');
+      if (dbBlock) dbBlock.style.display = '';
+    }
+  }
 }
 
 function deleteTask(taskId) {
@@ -2384,6 +2493,15 @@ function renderTrackDb() {
   }, {});
   const groupedCoordinatorIds = Object.keys(grouped);
 
+  // Group by company name for company view
+  const byCompany = entries.reduce((acc, entry) => {
+    const key = normalizeEntityName(entry.companyName);
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(entry);
+    return acc;
+  }, {});
+  const companyKeys = Object.keys(byCompany);
+
   el.innerHTML = `
     <div class="section-header">
       <div>
@@ -2405,12 +2523,27 @@ function renderTrackDb() {
         <div class="form-row">
           ${isManager ? `
           <div class="form-group">
+            <label class="form-label">Upload as</label>
+            <select class="form-select" id="trackdb-upload-owner-type" onchange="toggleTrackDbOwnerType()">
+              <option value="coordinator">Coordinator</option>
+              <option value="manager">Manager (myself)</option>
+            </select>
+          </div>
+          <div class="form-group" id="trackdb-coord-select-wrap">
             <label class="form-label">Coordinator</label>
             <select class="form-select" id="trackdb-upload-coordinator">
               <option value="">Select coordinator</option>
               ${coordinators.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
             </select>
-          </div>` : ''}
+          </div>
+          <div class="form-group">
+            <label class="form-label">Sub-Category (optional)</label>
+            <select class="form-select" id="trackdb-upload-subcat">
+              <option value="">None</option>
+              ${(DATA.dbSubCategories || []).map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')}
+            </select>
+          </div>
+          ` : ''}
           <div class="form-group">
             <label class="form-label">CSV File</label>
             <input type="file" class="form-input" id="trackdb-upload-file" accept=".csv,text/csv">
@@ -2423,6 +2556,7 @@ function renderTrackDb() {
     ${isManager ? `
       <div class="tabs" style="margin-bottom:var(--sp-4)">
         <div class="tab ${APP.trackDbViewMode === 'all' ? 'active' : ''}" onclick="setTrackDbViewMode('all')">All Companies</div>
+        <div class="tab ${APP.trackDbViewMode === 'company' ? 'active' : ''}" onclick="setTrackDbViewMode('company')">By Company</div>
         <div class="tab ${APP.trackDbViewMode === 'grouped' ? 'active' : ''}" onclick="setTrackDbViewMode('grouped')">By Coordinator</div>
       </div>
     ` : ''}
@@ -2452,6 +2586,37 @@ function renderTrackDb() {
       </div>
     ` : ''}
 
+    ${isManager && APP.trackDbViewMode === 'company' ? `
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">By Company</span>
+          <span class="text-muted text-sm">${companyKeys.length} compan${companyKeys.length !== 1 ? 'ies' : 'y'}</span>
+        </div>
+        <div class="card-body">
+          ${companyKeys.length ? companyKeys.map(normName => {
+            const rowEntries = byCompany[normName] || [];
+            const companyName = rowEntries[0]?.companyName || normName;
+            const encodedCompanyName = encodeForAttr(companyName);
+            return `
+              <div class="card mb-4" style="overflow:hidden">
+                <div class="d-flex items-center gap-3 p-3" style="flex-wrap:wrap">
+                  <span class="fw-500" style="flex:1">${escapeHtml(companyName)}</span>
+                  <span class="text-sm text-muted">${rowEntries.length} entr${rowEntries.length === 1 ? 'y' : 'ies'}</span>
+                  <button class="btn btn-ghost btn-sm" onclick="downloadDbCsvByCompany('${encodedCompanyName}')">⬇️ CSV</button>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Company</th><th>Coordinator</th><th>Status</th><th>Comments</th><th>Source</th><th>POC</th><th>Actions</th></tr></thead>
+                    <tbody>${renderTrackDbTableRows(rowEntries, { showCoordinator: true })}</tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          }).join('') : '<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">No companies yet</div></div>'}
+        </div>
+      </div>
+    ` : ''}
+
     ${isManager && APP.trackDbViewMode === 'grouped' ? `
       <div class="card">
         <div class="card-header">
@@ -2468,7 +2633,7 @@ function renderTrackDb() {
               <div class="card mb-4" style="overflow:hidden">
                 <button class="btn btn-secondary" style="width:100%;justify-content:space-between" onclick="toggleTrackDbCoordinatorByEncoded('${encodedCoordinatorId}')">
                   <span>${escapeHtml(coordinatorName)}</span>
-                  <span>${rowEntries.length} compan${rowEntries.length === 1 ? 'y' : 'ies'} ${expanded ? '▲' : '▼'}</span>
+                  <span class="d-flex items-center gap-2">${rowEntries.length} compan${rowEntries.length === 1 ? 'y' : 'ies'} <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();downloadDbCsvByCoordinator('${encodedCoordinatorId}')">⬇️ CSV</button> ${expanded ? '▲' : '▼'}</span>
                 </button>
                 ${expanded ? `
                   <div class="table-wrap">
@@ -2493,7 +2658,7 @@ function setTrackDbStatusFilter(value) {
 }
 
 function setTrackDbViewMode(mode) {
-  APP.trackDbViewMode = mode === 'grouped' ? 'grouped' : 'all';
+  APP.trackDbViewMode = mode === 'grouped' ? 'grouped' : mode === 'company' ? 'company' : 'all';
   renderTrackDb();
 }
 
@@ -2512,15 +2677,25 @@ async function uploadTrackDbCsv() {
   const file = fileInput?.files?.[0];
   let coordinatorId = APP.user.id;
   let coordinatorName = APP.user.name;
+  let uploadedByRole = APP.role === 'manager' ? 'manager' : 'coordinator';
   if (APP.role === 'manager') {
-    coordinatorId = document.getElementById('trackdb-upload-coordinator')?.value || '';
-    if (!coordinatorId) {
-      alert('Please select a coordinator to associate with this CSV upload.');
-      return;
+    const ownerType = document.getElementById('trackdb-upload-owner-type')?.value || 'coordinator';
+    if (ownerType === 'manager') {
+      coordinatorId = APP.user.id;
+      coordinatorName = APP.user.name;
+      uploadedByRole = 'manager';
+    } else {
+      coordinatorId = document.getElementById('trackdb-upload-coordinator')?.value || '';
+      if (!coordinatorId) {
+        alert('Please select a coordinator to associate with this CSV upload.');
+        return;
+      }
+      coordinatorName = getCoordinator(coordinatorId)?.name || '';
+      uploadedByRole = 'coordinator';
     }
-    coordinatorName = getCoordinator(coordinatorId)?.name || '';
   }
-  const ok = await importDbCsvFile(file, { coordinatorId, coordinatorName, sourceTaskId: '' });
+  const subCategory = document.getElementById('trackdb-upload-subcat')?.value || '';
+  const ok = await importDbCsvFile(file, { coordinatorId, coordinatorName, sourceTaskId: '', subCategory, uploadedByRole });
   if (!ok) return;
   saveDbCompanies();
   if (fileInput) fileInput.value = '';
@@ -3256,6 +3431,512 @@ function addNotification(text, options = {}) {
   if (options.browser === true) {
     showBrowserNotification('Eureka! Workplace', { body: text });
   }
+}
+
+
+// ── DATABASE WORK HELPERS ──
+function isDatabaseWorkTask(task) {
+  return task?.category === 'Database Work' || task?.dbWorkflowEnabled === true;
+}
+
+function normalizeEntityName(name) {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/[.,]/g, '');
+}
+
+function getEntityLabelForSubCategory(subCategory) {
+  const map = {
+    'Incubator': 'Incubator Name',
+    'Government Partner': 'Government Partner Name',
+    'Venture Capitalist': 'VC Firm Name',
+    'Accelerator': 'Accelerator Name',
+    'Media Partner': 'Media Partner Name',
+    'Incentive Partner': 'Incentive Partner Name',
+    'Corporate Partner': 'Corporate Partner Name',
+    'Mentor': 'Mentor / Organization Name',
+  };
+  return map[subCategory] || 'Company / Organization Name';
+}
+
+function getTaskNameById(taskId) {
+  return DATA.tasks.find(t => t.id === taskId)?.name || taskId;
+}
+
+function getCoordinatorNameById(userId) {
+  return getCoordinator(userId)?.name || userId;
+}
+
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+}
+
+function getEmailDomain(email) {
+  const e = normalizeEmail(email);
+  const at = e.indexOf('@');
+  return at !== -1 ? e.slice(at + 1) : '';
+}
+
+function collectPocEmails() {
+  const emails = [];
+  DATA.pocs.forEach(p => {
+    if (p.email) emails.push({ email: normalizeEmail(p.email), pocName: p.name, pocOrg: p.organization || '', pocId: p.id });
+  });
+  return emails;
+}
+
+function findPocDomainConflicts(contacts) {
+  const pocEmails = collectPocEmails();
+  const pocDomains = pocEmails.map(pe => ({ ...pe, domain: getEmailDomain(pe.email) })).filter(pe => pe.domain);
+  const conflicts = [];
+  contacts.forEach(c => {
+    const domain = getEmailDomain(c.email);
+    if (!domain) return;
+    const exactMatch = pocEmails.find(pe => pe.email === normalizeEmail(c.email));
+    if (exactMatch) {
+      conflicts.push({ type: 'exact', uploadedEmail: c.email, pocEmail: exactMatch.email, pocName: exactMatch.pocName, pocOrg: exactMatch.pocOrg });
+      return;
+    }
+    const domainMatch = pocDomains.find(pe => pe.domain === domain);
+    if (domainMatch) {
+      conflicts.push({ type: 'domain', uploadedEmail: c.email, domain, pocEmail: domainMatch.email, pocName: domainMatch.pocName, pocOrg: domainMatch.pocOrg });
+    }
+  });
+  return conflicts;
+}
+
+function findExistingDbEmailConflicts(contacts, context = {}) {
+  const conflicts = [];
+  const existingEmails = new Map();
+  DATA.dbCompanies.forEach(entry => {
+    (entry.contacts || []).forEach(c => {
+      const e = normalizeEmail(c.email);
+      if (e) existingEmails.set(e, { company: entry.companyName, coordinatorName: entry.coordinatorName, sourceTaskId: entry.sourceTaskId, entryId: entry.id });
+    });
+  });
+  contacts.forEach(c => {
+    const e = normalizeEmail(c.email);
+    if (existingEmails.has(e)) {
+      const ex = existingEmails.get(e);
+      conflicts.push({ email: c.email, existingCompany: ex.company, existingCoordinator: ex.coordinatorName, existingTask: getTaskNameById(ex.sourceTaskId) });
+    }
+  });
+  return conflicts;
+}
+
+function findEntityNameConflicts(name, currentEntityId = '') {
+  const norm = normalizeEntityName(name);
+  if (!norm) return [];
+  const conflicts = [];
+  DATA.tasks.forEach(task => {
+    if (!Array.isArray(task.dbEntities)) return;
+    task.dbEntities.forEach(entity => {
+      if (entity.id === currentEntityId) return;
+      if (normalizeEntityName(entity.name) === norm) {
+        conflicts.push({
+          entityId: entity.id,
+          entityName: entity.name,
+          taskId: task.id,
+          taskName: task.name,
+          coordinatorId: entity.coordinatorId,
+          coordinatorName: entity.coordinatorName
+        });
+      }
+    });
+  });
+  DATA.dbCompanies.forEach(entry => {
+    if (normalizeEntityName(entry.companyName) === norm) {
+      conflicts.push({
+        entityId: entry.id,
+        entityName: entry.companyName,
+        taskId: entry.sourceTaskId,
+        taskName: getTaskNameById(entry.sourceTaskId),
+        coordinatorId: entry.coordinatorId,
+        coordinatorName: entry.coordinatorName
+      });
+    }
+  });
+  return conflicts;
+}
+
+function normalizeTaskForDatabaseWorkflow(task) {
+  if (!task) return task;
+  if (task.category === 'Database Work' || task.dbWorkflowEnabled) {
+    if (!task.dbWorkflowEnabled) task.dbWorkflowEnabled = true;
+    if (!task.dbSubCategory) task.dbSubCategory = (Array.isArray(DATA.dbSubCategories) && DATA.dbSubCategories[0]) || 'Other';
+    if (!Array.isArray(task.dbEntities)) task.dbEntities = [];
+  }
+  return task;
+}
+
+function downloadCsv(filename, rows) {
+  const escape = (val) => {
+    const s = String(val ?? '');
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  };
+  const csv = rows.map(row => row.map(escape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function contactsToCsvRows(entries) {
+  const header = ['Name', 'Email', 'Company', 'Sub Category', 'Coordinator', 'Source Task', 'Status', 'Comment'];
+  const rows = [header];
+  entries.forEach(entry => {
+    const taskName = getTaskNameById(entry.sourceTaskId);
+    (entry.contacts || []).forEach(c => {
+      rows.push([c.name || '', c.email || '', entry.companyName || c.company || '', entry.subCategory || '', entry.coordinatorName || '', taskName, entry.status || '', entry.comment || '']);
+    });
+  });
+  return rows;
+}
+
+function downloadDbCsvByCompany(encodedCompanyName) {
+  const companyName = decodeFromAttr(encodedCompanyName);
+  const norm = normalizeEntityName(companyName);
+  const entries = DATA.dbCompanies.filter(e => normalizeEntityName(e.companyName) === norm);
+  downloadCsv(`db-${norm}.csv`, contactsToCsvRows(entries));
+}
+
+function downloadDbCsvByCoordinator(encodedCoordinatorId) {
+  const coordinatorId = decodeFromAttr(encodedCoordinatorId);
+  const entries = DATA.dbCompanies.filter(e => e.coordinatorId === coordinatorId);
+  const name = getCoordinatorNameById(coordinatorId).replace(/\s+/g, '-').toLowerCase();
+  downloadCsv(`db-coordinator-${name}.csv`, contactsToCsvRows(entries));
+}
+
+function downloadDbCsvForEntries(entries, filename) {
+  downloadCsv(filename || 'db-export.csv', contactsToCsvRows(entries));
+}
+
+function upsertDbCompanyEntryForEntity({ task, entity, contacts, uploadedByRole = 'coordinator' }) {
+  if (!task || !entity || !contacts || !contacts.length) return null;
+  const norm = normalizeEntityName(entity.name);
+  const existing = DATA.dbCompanies.find(e =>
+    e.sourceTaskId === task.id &&
+    e.coordinatorId === entity.coordinatorId &&
+    normalizeEntityName(e.companyName) === norm
+  );
+  if (existing) {
+    existing.contacts = ensureUniqueContacts(existing.contacts, contacts);
+    existing.subCategory = entity.subCategory || existing.subCategory;
+    existing.updatedAt = new Date().toISOString();
+    if (uploadedByRole) existing.uploadedByRole = uploadedByRole;
+    return existing;
+  }
+  const entry = {
+    id: createId('db-company'),
+    companyName: entity.name,
+    normalizedCompanyName: norm,
+    subCategory: entity.subCategory || task.dbSubCategory || '',
+    status: 'Mail Sent',
+    comment: '',
+    coordinatorId: entity.coordinatorId,
+    coordinatorName: entity.coordinatorName || getCoordinator(entity.coordinatorId)?.name || 'Unknown',
+    sourceTaskId: task.id,
+    contacts: ensureUniqueContacts([], contacts),
+    pocId: '',
+    uploadedByRole: uploadedByRole || 'coordinator',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  DATA.dbCompanies.unshift(entry);
+  return entry;
+}
+
+async function confirmDbUploadWarnings({ contacts, companyName, context = {} }) {
+  const emailConflicts = findExistingDbEmailConflicts(contacts, context);
+  if (emailConflicts.length) {
+    const msg = `${emailConflicts.length} email${emailConflicts.length !== 1 ? 's' : ''} already exist in the DB:\n` +
+      emailConflicts.slice(0, 5).map(ec => `  • ${ec.email} (${ec.existingCompany} / ${ec.existingCoordinator})`).join('\n') +
+      (emailConflicts.length > 5 ? `\n  ...and ${emailConflicts.length - 5} more.` : '') +
+      '\n\nClick OK to remove duplicates and continue, Cancel to stop upload.';
+    const ok = confirm(msg);
+    if (!ok) return null;
+    const dupEmails = new Set(emailConflicts.map(ec => normalizeEmail(ec.email)));
+    contacts = contacts.filter(c => !dupEmails.has(normalizeEmail(c.email)));
+    if (!contacts.length) { alert('No contacts remaining after removing duplicates.'); return null; }
+  }
+  const domainConflicts = findPocDomainConflicts(contacts);
+  if (domainConflicts.length) {
+    const unique = [...new Map(domainConflicts.map(dc => [dc.type === 'exact' ? dc.uploadedEmail : dc.domain, dc])).values()];
+    const msg = unique.map(dc =>
+      dc.type === 'exact'
+        ? `⚠️ ${dc.uploadedEmail} exactly matches existing POC: ${dc.pocName} (${dc.pocOrg})`
+        : `⚠️ @${dc.domain} may already have POC: ${dc.pocName} (${dc.pocOrg}). Contact your manager before proceeding.`
+    ).join('\n');
+    if (!confirm(msg + '\n\nContinue anyway?')) return null;
+  }
+  return contacts;
+}
+
+function renderDbSubCategoryOptions(selected) {
+  return (Array.isArray(DATA.dbSubCategories) ? DATA.dbSubCategories : []).map(s =>
+    `<option value="${escapeHtml(s)}" ${selected === s ? 'selected' : ''}>${escapeHtml(s)}</option>`
+  ).join('');
+}
+
+function toggleTrackDbOwnerType() {
+  const ownerType = document.getElementById('trackdb-upload-owner-type')?.value;
+  const coordWrap = document.getElementById('trackdb-coord-select-wrap');
+  if (coordWrap) coordWrap.style.display = ownerType === 'manager' ? 'none' : '';
+}
+
+function addDbSubCategory() {
+  if (APP.role !== 'manager') return;
+  const name = prompt('New sub-category name:')?.trim();
+  if (!name) return;
+  if (!Array.isArray(DATA.dbSubCategories)) DATA.dbSubCategories = [];
+  if (DATA.dbSubCategories.some(s => s.toLowerCase() === name.toLowerCase())) { alert('Already exists.'); return; }
+  DATA.dbSubCategories.push(name);
+  saveDbSubCategories();
+  const sel = document.getElementById('nt-db-sub-category');
+  if (sel) sel.innerHTML = renderDbSubCategoryOptions(name);
+}
+
+function renameDbSubCategory() {
+  if (APP.role !== 'manager') return;
+  const sel = document.getElementById('nt-db-sub-category');
+  const current = sel?.value;
+  if (!current) return;
+  const next = prompt('Rename sub-category:', current)?.trim();
+  if (!next || next === current) return;
+  if (!Array.isArray(DATA.dbSubCategories)) return;
+  const idx = DATA.dbSubCategories.indexOf(current);
+  if (idx === -1) return;
+  DATA.dbSubCategories[idx] = next;
+  saveDbSubCategories();
+  if (sel) sel.innerHTML = renderDbSubCategoryOptions(next);
+}
+
+function deleteDbSubCategory() {
+  if (APP.role !== 'manager') return;
+  const sel = document.getElementById('nt-db-sub-category');
+  const current = sel?.value;
+  if (!current) return;
+  if (!confirm(`Delete sub-category "${current}"?`)) return;
+  if (!Array.isArray(DATA.dbSubCategories)) return;
+  DATA.dbSubCategories = DATA.dbSubCategories.filter(s => s !== current);
+  saveDbSubCategories();
+  if (sel) sel.innerHTML = renderDbSubCategoryOptions(DATA.dbSubCategories[0] || '');
+}
+
+function renderDatabaseWorkSection(task) {
+  if (!isDatabaseWorkTask(task)) return '';
+  normalizeTaskForDatabaseWorkflow(task);
+  const isManager = APP.role === 'manager';
+  const isAssignedCoord = APP.role === 'coordinator' && task.assignedTo === APP.user?.id;
+  const canManage = isManager || isAssignedCoord;
+  const entities = Array.isArray(task.dbEntities) ? task.dbEntities : [];
+  const label = getEntityLabelForSubCategory(task.dbSubCategory);
+  const hasEntities = entities.length > 0;
+  const encodedTaskId = encodeForAttr(task.id);
+
+  const entityRows = entities.map(entity => {
+    const encodedEntityId = encodeForAttr(entity.id);
+    const dbEntry = DATA.dbCompanies.find(e =>
+      e.sourceTaskId === task.id &&
+      e.coordinatorId === entity.coordinatorId &&
+      normalizeEntityName(e.companyName) === normalizeEntityName(entity.name)
+    );
+    const contactCount = dbEntry ? (dbEntry.contacts || []).length : 0;
+    const uploaded = contactCount > 0;
+    const canManageEntity = isManager || (isAssignedCoord && entity.coordinatorId === APP.user?.id);
+    return `
+      <tr>
+        <td class="td-main">${escapeHtml(entity.name)}</td>
+        <td><span class="badge badge-yellow">${escapeHtml(entity.subCategory || task.dbSubCategory || '')}</span></td>
+        <td class="text-sm text-muted">${escapeHtml(entity.coordinatorName || '')}</td>
+        <td>${uploaded ? `<span class="badge badge-green">✅ ${contactCount} contacts</span>` : '<span class="badge badge-gray">Not uploaded</span>'}</td>
+        <td onclick="event.stopPropagation()">
+          <div class="d-flex gap-2" style="flex-wrap:wrap">
+            ${canManageEntity ? `
+              <button class="btn btn-ghost btn-sm" onclick="editDbEntity('${encodedTaskId}','${encodedEntityId}')">✏️</button>
+              <button class="btn btn-ghost btn-sm" onclick="deleteDbEntity('${encodedTaskId}','${encodedEntityId}')">🗑️</button>
+            ` : ''}
+            <button class="btn btn-primary btn-sm" onclick="uploadDbCsvForEntity('${encodedTaskId}','${encodedEntityId}')">⬆️ Upload CSV</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <hr class="divider">
+    <div class="fw-600 mb-2" style="font-size:14px">🗂️ Database Work Progress</div>
+    <div class="card mb-4">
+      <div class="card-body">
+        <div class="d-flex items-center gap-3 mb-3" style="flex-wrap:wrap">
+          <span class="badge badge-yellow">Sub-category: ${escapeHtml(task.dbSubCategory || '—')}</span>
+          <span class="text-sm text-muted">Stage 1: Add target entities → Stage 2: Upload contacts CSV</span>
+        </div>
+
+        ${canManage ? `
+        <div class="form-row mb-3">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Add Entity</label>
+            <input class="form-input" id="db-entity-name-${toDomSafeId(task.id)}" placeholder="${escapeHtml(label)}">
+          </div>
+          <div class="form-group" style="align-self:flex-end">
+            <button class="btn btn-primary" onclick="addDbEntityToTask('${encodedTaskId}')">Add Entity</button>
+          </div>
+        </div>
+        ` : ''}
+
+        ${hasEntities ? `
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Entity Name</th><th>Sub-Category</th><th>Added By</th><th>Contacts</th><th>Actions</th></tr></thead>
+            <tbody>${entityRows}</tbody>
+          </table>
+        </div>
+        ` : '<div class="text-sm text-muted">No entities added yet. Use the form above to add target organizations.</div>'}
+      </div>
+    </div>
+  `;
+}
+
+async function addDbEntityToTask(encodedTaskId) {
+  const taskId = decodeFromAttr(encodedTaskId);
+  const task = getTask(taskId);
+  if (!task) return;
+  const isManager = APP.role === 'manager';
+  const isAssignedCoord = APP.role === 'coordinator' && task.assignedTo === APP.user?.id;
+  if (!isManager && !isAssignedCoord) { alert('You do not have permission to add entities to this task.'); return; }
+  const input = document.getElementById(`db-entity-name-${toDomSafeId(taskId)}`);
+  const name = input?.value?.trim();
+  if (!name) { alert('Please enter an entity name.'); return; }
+  normalizeTaskForDatabaseWorkflow(task);
+  const norm = normalizeEntityName(name);
+  const conflicts = findEntityNameConflicts(name);
+  if (conflicts.length) {
+    const msg = conflicts.map(c => `"${c.entityName}" already added by ${c.coordinatorName} in "${c.taskName}"`).join('\n');
+    if (!confirm(`Warning: Similar entity already exists:\n${msg}\n\nAdd anyway?`)) return;
+  }
+  const entity = {
+    id: createId('db-entity'),
+    name,
+    normalizedName: norm,
+    subCategory: task.dbSubCategory || '',
+    sourceTaskId: task.id,
+    coordinatorId: task.assignedTo || APP.user.id,
+    coordinatorName: isManager ? (getCoordinator(task.assignedTo)?.name || '') : (APP.user.name || ''),
+    createdBy: APP.user.id,
+    createdByName: APP.user.name,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    contactsUploaded: false,
+    contactCount: 0
+  };
+  if (!Array.isArray(task.dbEntities)) task.dbEntities = [];
+  task.dbEntities.push(entity);
+  saveDataCollection('tasks');
+  if (input) input.value = '';
+  openTaskDetail(taskId);
+}
+
+function editDbEntity(encodedTaskId, encodedEntityId) {
+  const taskId = decodeFromAttr(encodedTaskId);
+  const entityId = decodeFromAttr(encodedEntityId);
+  const task = getTask(taskId);
+  if (!task || !Array.isArray(task.dbEntities)) return;
+  const entity = task.dbEntities.find(e => e.id === entityId);
+  if (!entity) return;
+  const isManager = APP.role === 'manager';
+  const isOwner = APP.role === 'coordinator' && entity.coordinatorId === APP.user?.id;
+  if (!isManager && !isOwner) { alert('You do not have permission to edit this entity.'); return; }
+  const newName = prompt('Edit entity name:', entity.name)?.trim();
+  if (!newName) return;
+  if (newName !== entity.name) {
+    const conflicts = findEntityNameConflicts(newName, entityId);
+    if (conflicts.length) {
+      const msg = conflicts.map(c => `"${c.entityName}" already added by ${c.coordinatorName} in "${c.taskName}"`).join('\n');
+      if (!confirm(`Warning:\n${msg}\n\nContinue?`)) return;
+    }
+    entity.name = newName;
+    entity.normalizedName = normalizeEntityName(newName);
+    entity.updatedAt = new Date().toISOString();
+    saveDataCollection('tasks');
+  }
+  openTaskDetail(taskId);
+}
+
+function deleteDbEntity(encodedTaskId, encodedEntityId) {
+  const taskId = decodeFromAttr(encodedTaskId);
+  const entityId = decodeFromAttr(encodedEntityId);
+  const task = getTask(taskId);
+  if (!task || !Array.isArray(task.dbEntities)) return;
+  const idx = task.dbEntities.findIndex(e => e.id === entityId);
+  if (idx === -1) return;
+  const entity = task.dbEntities[idx];
+  const isManager = APP.role === 'manager';
+  const isOwner = APP.role === 'coordinator' && entity.coordinatorId === APP.user?.id;
+  if (!isManager && !isOwner) { alert('You do not have permission to delete this entity.'); return; }
+  if (!confirm(`Delete entity "${entity.name}"?`)) return;
+  task.dbEntities.splice(idx, 1);
+  saveDataCollection('tasks');
+  openTaskDetail(taskId);
+}
+
+async function uploadDbCsvForEntity(encodedTaskId, encodedEntityId) {
+  const taskId = decodeFromAttr(encodedTaskId);
+  const entityId = decodeFromAttr(encodedEntityId);
+  const task = getTask(taskId);
+  if (!task || !Array.isArray(task.dbEntities)) return;
+  const entity = task.dbEntities.find(e => e.id === entityId);
+  if (!entity) return;
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.csv,text/csv';
+  fileInput.style.display = 'none';
+  document.body.appendChild(fileInput);
+  fileInput.onchange = async () => {
+    const file = fileInput.files?.[0];
+    document.body.removeChild(fileInput);
+    if (!file) return;
+    let text = '';
+    try { text = await file.text(); } catch { alert('Unable to read file.'); return; }
+    const { contacts, error } = parseDbCsv(text);
+    if (error) { alert(error); return; }
+    const invalidEmails = contacts.filter(c => !isValidEmail(c.email));
+    if (invalidEmails.length) {
+      alert(`Invalid email format in ${invalidEmails.length} row(s):\n${invalidEmails.slice(0,5).map(c=>c.email).join('\n')}`);
+      return;
+    }
+    const norm = normalizeEntityName(entity.name);
+    const mismatch = contacts.filter(c => normalizeEntityName(c.company) !== norm);
+    if (mismatch.length) {
+      if (!confirm(`${mismatch.length} row(s) have a company name that doesn't match "${entity.name}". Continue?`)) return;
+    }
+    const finalContacts = await confirmDbUploadWarnings({ contacts, companyName: entity.name });
+    if (!finalContacts) return;
+    if (!finalContacts.length) { alert('No contacts to upload.'); return; }
+    const isManager = APP.role === 'manager';
+    const uploadedByRole = isManager ? 'manager' : 'coordinator';
+    const dbEntry = upsertDbCompanyEntryForEntity({ task, entity, contacts: finalContacts, uploadedByRole });
+    if (!dbEntry) return;
+    entity.contactsUploaded = true;
+    entity.contactCount = dbEntry.contacts.length;
+    entity.updatedAt = new Date().toISOString();
+    saveDataCollection('tasks');
+    saveDataCollection('dbCompanies');
+    addNotification(`DB CSV uploaded for entity "${escapeHtml(entity.name)}" in task "${escapeHtml(task.name)}".`, { browser: true });
+    alert(`Uploaded ${finalContacts.length} contact(s) for "${entity.name}".`);
+    openTaskDetail(taskId);
+  };
+  fileInput.click();
 }
 
 // ── STARTUP ──
