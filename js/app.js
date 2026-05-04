@@ -1683,6 +1683,7 @@ function openEditTaskModal(taskId) {
     </div>`}
   `;
   document.getElementById('save-new-task-btn').onclick = () => {
+    const origCategory = task.category;
     task.name = document.getElementById('nt-name')?.value?.trim() || task.name;
     task.category = document.getElementById('nt-cat')?.value;
     task.assignedTo = document.getElementById('nt-assign')?.value;
@@ -1694,7 +1695,7 @@ function openEditTaskModal(taskId) {
       if (newSubCat && newSubCat !== task.dbSubCategory) {
         if (Array.isArray(task.dbEntities) && task.dbEntities.length) {
           if (!confirm('Changing sub-category may affect existing DB entries. Continue?')) {
-            task.category = document.getElementById('nt-cat')?.value;
+            task.category = origCategory;
             return;
           }
         }
@@ -2523,21 +2524,21 @@ function renderTrackDb() {
         <div class="form-row">
           ${isManager ? `
           <div class="form-group">
-            <label class="form-label">Upload as</label>
+            <label class="form-label" for="trackdb-upload-owner-type">Upload as</label>
             <select class="form-select" id="trackdb-upload-owner-type" onchange="toggleTrackDbOwnerType()">
               <option value="coordinator">Coordinator</option>
               <option value="manager">Manager (myself)</option>
             </select>
           </div>
           <div class="form-group" id="trackdb-coord-select-wrap">
-            <label class="form-label">Coordinator</label>
+            <label class="form-label" for="trackdb-upload-coordinator">Coordinator</label>
             <select class="form-select" id="trackdb-upload-coordinator">
               <option value="">Select coordinator</option>
               ${coordinators.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Sub-Category (optional)</label>
+            <label class="form-label" for="trackdb-upload-subcat">Sub-Category (optional)</label>
             <select class="form-select" id="trackdb-upload-subcat">
               <option value="">None</option>
               ${(DATA.dbSubCategories || []).map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')}
