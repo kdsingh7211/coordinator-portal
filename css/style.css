@@ -742,6 +742,21 @@ tbody tr:hover { background: var(--bg-raised); }
 /* Danger zone */
 .danger-text { color: var(--red); font-size: 12px; margin-top: 4px; }
 
+/* ── TRACK DB COMPANY WISE ── */
+.trackdb-company-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--t-fast);
+}
+.trackdb-company-row:hover { background: var(--bg-raised); }
+.trackdb-company-selected { background: var(--accent-light); }
+.trackdb-company-checkbox { flex-shrink: 0; width: 16px; height: 16px; cursor: pointer; }
+
 /* Tooltip */
 [data-tooltip] { position: relative; }
 [data-tooltip]::after {
