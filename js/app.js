@@ -2843,6 +2843,7 @@ function renderTrackDb() {
   }, {});
   const groupedCoordinatorIds = Object.keys(grouped);
   const viewMode = APP.trackDbViewMode;
+  const companyGroups = viewMode === 'company' ? getTrackDbCompanyGroups(entries) : [];
 
   el.innerHTML = `
     <div class="section-header">
@@ -2948,7 +2949,7 @@ function renderTrackDb() {
       <div class="card">
         <div class="card-header">
           <span class="card-title">By Company</span>
-          <span class="text-muted text-sm">${getTrackDbCompanyGroups(entries).length} compan${getTrackDbCompanyGroups(entries).length !== 1 ? 'ies' : 'y'}</span>
+          <span class="text-muted text-sm">${companyGroups.length} compan${companyGroups.length !== 1 ? 'ies' : 'y'}</span>
         </div>
         <div class="card-body">
           ${renderTrackDbCompanyWise(entries)}
@@ -2999,6 +3000,14 @@ function toggleTrackDbCompanySelectedByEncoded(encodedKey, checked) {
 function clearTrackDbCompanySelection() {
   APP.trackDbSelectedCompanies = {};
   renderTrackDb();
+}
+
+function handleSelectAllTrackDbCompanies(checked) {
+  if (checked) {
+    selectAllVisibleTrackDbCompanies();
+  } else {
+    clearTrackDbCompanySelection();
+  }
 }
 
 function selectAllVisibleTrackDbCompanies() {
@@ -3059,7 +3068,7 @@ function renderTrackDbCompanyWise(entries) {
   const controls = `
     <div class="d-flex items-center gap-2 mb-4" style="flex-wrap:wrap">
       <label class="d-flex items-center gap-2 cursor-pointer" style="font-size:13px">
-        <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="if(this.checked){selectAllVisibleTrackDbCompanies();}else{clearTrackDbCompanySelection();}">
+        <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="handleSelectAllTrackDbCompanies(this.checked)">
         Select All Visible
       </label>
       <button class="btn btn-secondary btn-sm" onclick="clearTrackDbCompanySelection()">Clear Selection</button>
