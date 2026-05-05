@@ -21,6 +21,13 @@ const APP = {
   firebaseDb: null,
 };
 
+// ── DB SUB-CATEGORIES ──
+const DB_SUB_CATEGORIES_DEFAULT = [
+  'Incentive Partner', 'Government Partner', 'Venture Capitalist',
+  'Incubator', 'Accelerator', 'Media Partner', 'Corporate Partner',
+  'Mentor', 'Other'
+];
+
 // ── SEED DATA ──
 const DATA = {
   coordinators: [],
@@ -30,6 +37,7 @@ const DATA = {
   managerTimeline: [],
   pocs: [],
   dbCompanies: [],
+  dbSubCategories: DB_SUB_CATEGORIES_DEFAULT.slice(),
   resources: [
     { id: 'r1', name: 'Cold Email Template', desc: 'Standard outreach email for incubators and startups', type: 'Email Template', icon: '📧', category: 'Templates', url: '#' },
     { id: 'r2', name: 'Follow-up Email #1', desc: 'First follow-up, send 3 days after initial email', type: 'Email Template', icon: '📨', category: 'Templates', url: '#' },
@@ -60,6 +68,7 @@ const DATA_STORAGE_KEYS = {
   managerTimeline: 'cp-manager-timeline',
   pocs: 'cp-pocs',
   dbCompanies: 'cp-db-companies',
+  dbSubCategories: 'cp-db-sub-categories',
   notifications: 'cp-notifications',
   categories: 'cp-categories',
   resources: 'cp-resources'
@@ -70,6 +79,7 @@ const FIREBASE_DATA_PATHS = {
   managerTimeline: 'cp-manager-timeline',
   pocs: 'cp-pocs',
   dbCompanies: 'cp-db-companies',
+  dbSubCategories: 'cp-db-sub-categories',
   notifications: 'cp-notifications',
   categories: 'cp-categories',
   resources: 'cp-resources'
@@ -304,6 +314,7 @@ async function syncAllAppData() {
 // ── PERSISTENCE WRAPPERS ──
 function saveTasks() { saveDataCollection('tasks'); }
 function saveDbCompanies() { saveDataCollection('dbCompanies'); }
+function saveDbSubCategories() { saveDataCollection('dbSubCategories'); }
 function savePocs() { saveDataCollection('pocs'); }
 function saveManagerTimeline() { saveDataCollection('managerTimeline'); }
 function saveNotifications() { saveDataCollection('notifications'); }
@@ -715,9 +726,40 @@ function hasDbUploadForTask(taskId, coordinatorId) {
   return DATA.dbCompanies.some(entry => entry.sourceTaskId === taskId && entry.coordinatorId === coordinatorId);
 }
 
+// ── DATABASE WORK HELPERS ──
+function isDatabaseWorkTask(task) {
+  return task?.category === 'Database Work' || task?.dbWorkflowEnabled === true;
+}
+
+function normalizeTask(task) {
+  if (!task) return task;
+  if (!Array.isArray(task.comments)) task.comments = [];
+  if (!Array.isArray(task.subtasks)) task.subtasks = [];
+  if (!Array.isArray(task.timeline)) task.timeline = [];
+  if (isDatabaseWorkTask(task)) {
+    task.dbWorkflowEnabled = true;
+    task.dbRequired = true;
+    if (!task.dbSubCategory) task.dbSubCategory = '';
+    if (!Array.isArray(task.dbEntities)) task.dbEntities = [];
+  } else {
+    if (!Array.isArray(task.dbEntities)) task.dbEntities = [];
+  }
+  return task;
+}
+
+function normalizeAllTasks() {
+  DATA.tasks.forEach(normalizeTask);
+}
+
 function shouldBlockTaskCompletion(task, status, isAssignedCoordinator, userId) {
   if (status !== 'Done') return false;
   if (!isAssignedCoordinator) return false;
+  if (isDatabaseWorkTask(task)) {
+    // DB Work tasks: block unless at least one entity has contactsUploaded
+    const entities = task.dbEntities || [];
+    if (!entities.length) return true;
+    return !entities.some(e => e.contactsUploaded);
+  }
   if (!task?.dbRequired) return false;
   return !hasDbUploadForTask(task.id, userId);
 }
@@ -1113,12 +1155,195 @@ function renderTaskTable(tasks, isManager, tbodyId) {
 }
 
 // ── TASK DETAIL MODAL ──
-function openTaskDetail(taskId) {
+// ── SUBTASK BUILDER HELPERS ──
+function renderSubtaskBuilder(existingSubtasks) {
+  const subs = Array.isArray(existingSubtasks) ? existingSubtasks : [];
+  return `
+    <div class="fw-600 mb-3" style="font-size:13px">📊 Subtasks / Metrics</div>
+    <div id="subtask-builder-list">
+      ${subs.map((s, idx) => `
+        <div class="form-row subtask-builder-row" data-sub-idx="${idx}" style="align-items:center;margin-bottom:8px">
+          <input class="form-input" placeholder="Subtask name" id="sub-name-${idx}" value="${escapeHtml(s.name || '')}">
+          <select class="form-select" id="sub-type-${idx}" onchange="onSubtaskTypeChange(${idx})" style="width:120px;flex:0 0 auto">
+            <option value="checkbox" ${s.type === 'checkbox' ? 'selected' : ''}>Checkbox</option>
+            <option value="number" ${s.type === 'number' ? 'selected' : ''}>Numeric</option>
+          </select>
+          <div id="sub-target-wrap-${idx}" style="display:${s.type === 'number' ? '' : 'none'};flex:0 0 auto">
+            <input type="number" class="form-input" placeholder="Target" id="sub-target-${idx}" value="${s.target || ''}" style="width:80px">
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="removeSubtaskRow(${idx})" style="flex:0 0 auto">🗑️</button>
+        </div>
+      `).join('')}
+    </div>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="addSubtaskInputRow()">+ Add Subtask</button>
+  `;
+}
+
+function onSubtaskTypeChange(idx) {
+  const wrap = document.getElementById('sub-target-wrap-' + idx);
+  const sel = document.getElementById('sub-type-' + idx);
+  if (wrap && sel) wrap.style.display = sel.value === 'number' ? '' : 'none';
+}
+
+function addSubtaskInputRow() {
+  const list = document.getElementById('subtask-builder-list');
+  if (!list) return;
+  const rows = list.querySelectorAll('.subtask-builder-row');
+  const idx = rows.length;
+  const div = document.createElement('div');
+  div.className = 'form-row subtask-builder-row';
+  div.dataset.subIdx = idx;
+  div.style.cssText = 'align-items:center;margin-bottom:8px';
+  div.innerHTML = `
+    <input class="form-input" placeholder="Subtask name" id="sub-name-${idx}" value="">
+    <select class="form-select" id="sub-type-${idx}" onchange="onSubtaskTypeChange(${idx})" style="width:120px;flex:0 0 auto">
+      <option value="checkbox">Checkbox</option>
+      <option value="number">Numeric</option>
+    </select>
+    <div id="sub-target-wrap-${idx}" style="display:none;flex:0 0 auto">
+      <input type="number" class="form-input" placeholder="Target" id="sub-target-${idx}" value="" style="width:80px">
+    </div>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="removeSubtaskRow(${idx})" style="flex:0 0 auto">🗑️</button>
+  `;
+  list.appendChild(div);
+}
+
+function removeSubtaskRow(idx) {
+  const row = document.querySelector(`.subtask-builder-row[data-sub-idx="${idx}"]`);
+  if (row) row.remove();
+}
+
+function collectSubtasksFromForm() {
+  const rows = document.querySelectorAll('.subtask-builder-row');
+  const subtasks = [];
+  rows.forEach(row => {
+    const idx = row.dataset.subIdx;
+    const nameEl = document.getElementById('sub-name-' + idx);
+    const typeEl = document.getElementById('sub-type-' + idx);
+    const targetEl = document.getElementById('sub-target-' + idx);
+    const name = nameEl?.value?.trim();
+    if (!name) return;
+    const type = typeEl?.value === 'number' ? 'number' : 'checkbox';
+    const target = type === 'number' ? (parseFloat(targetEl?.value) || 100) : undefined;
+    const sub = { id: createId('sub'), name, type, value: type === 'checkbox' ? false : 0 };
+    if (type === 'number') sub.target = target;
+    subtasks.push(sub);
+  });
+  return subtasks;
+}
+
+// ── DB ENTITY MANAGEMENT ──
+function addDbEntity(taskId) {
   const task = getTask(taskId);
   if (!task) return;
   const isManager = APP.role === 'manager';
   const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user?.id;
+  if (!isManager && !isAssignedCoordinator) return;
+  const input = document.getElementById('db-entity-name-input-' + toDomSafeId(taskId));
+  const entityName = input?.value?.trim();
+  if (!entityName) { alert('Please enter an entity name.'); return; }
+  const normalized = normalizeCompanyName(entityName);
+  // Conflict check across all tasks
+  let conflictMsg = '';
+  DATA.tasks.forEach(t => {
+    if (!Array.isArray(t.dbEntities)) return;
+    t.dbEntities.forEach(e => {
+      if (normalizeCompanyName(e.name) === normalized) {
+        const coordName = e.coordinatorName || getCoordinator(e.coordinatorId)?.name || 'Unknown';
+        conflictMsg += `"${e.name}" already added by ${coordName} in task "${t.name}".\n`;
+      }
+    });
+  });
+  if (conflictMsg) {
+    if (!confirm('⚠️ Conflict detected:\n' + conflictMsg + '\nDo you still want to add this entity?')) return;
+  }
+  if (!Array.isArray(task.dbEntities)) task.dbEntities = [];
+  task.dbEntities.push({
+    id: createId('entity'),
+    name: entityName,
+    normalizedName: normalized,
+    subCategory: task.dbSubCategory || '',
+    sourceTaskId: task.id,
+    coordinatorId: APP.user?.id || '',
+    coordinatorName: APP.user?.name || '',
+    createdBy: APP.user?.id || '',
+    createdByName: APP.user?.name || '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    contactsUploaded: false,
+    contactCount: 0
+  });
+  saveTasks();
+  openTaskDetail(task.id);
+}
+
+function deleteDbEntity(taskId, entityId) {
+  const task = getTask(taskId);
+  if (!task) return;
+  const isManager = APP.role === 'manager';
+  const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user?.id;
+  if (!isManager && !isAssignedCoordinator) return;
+  if (!confirm('Delete this entity?')) return;
+  task.dbEntities = (task.dbEntities || []).filter(e => e.id !== entityId);
+  saveTasks();
+  openTaskDetail(task.id);
+}
+
+function deleteDbEntityByEncoded(encodedTaskId, encodedEntityId) {
+  deleteDbEntity(decodeFromAttr(encodedTaskId), decodeFromAttr(encodedEntityId));
+}
+
+async function uploadEntityCsv(taskId, entityId) {
+  const task = getTask(taskId);
+  if (!task || !APP.user) return;
+  const isManager = APP.role === 'manager';
+  const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user.id;
+  if (!isManager && !isAssignedCoordinator) {
+    alert('Only the assigned coordinator or manager can upload CSV for this entity.');
+    return;
+  }
+  const entity = (task.dbEntities || []).find(e => e.id === entityId);
+  if (!entity) return;
+  const fileInputId = 'entity-csv-' + toDomSafeId(entityId);
+  const fileInput = document.getElementById(fileInputId);
+  const file = fileInput?.files?.[0];
+  const ok = await importDbCsvFile(file, {
+    coordinatorId: isManager ? (entity.coordinatorId || APP.user.id) : APP.user.id,
+    coordinatorName: isManager ? (entity.coordinatorName || APP.user.name) : APP.user.name,
+    sourceTaskId: task.id
+  });
+  if (!ok) return;
+  entity.contactsUploaded = true;
+  const coordId = isManager ? (entity.coordinatorId || APP.user.id) : APP.user.id;
+  entity.contactCount = DATA.dbCompanies
+    .filter(e => e.sourceTaskId === task.id && e.coordinatorId === coordId)
+    .reduce((sum, e) => sum + (Array.isArray(e.contacts) ? e.contacts.length : 0), 0);
+  entity.updatedAt = new Date().toISOString();
+  saveTasks();
+  saveDbCompanies();
+  if (fileInput) fileInput.value = '';
+  addNotification(`Entity CSV uploaded for "${escapeHtml(entity.name)}" in task "${escapeHtml(task.name)}".`, { browser: true });
+  alert('CSV uploaded successfully.');
+  openTaskDetail(task.id);
+}
+
+async function uploadEntityCsvByEncoded(encodedTaskId, encodedEntityId) {
+  await uploadEntityCsv(decodeFromAttr(encodedTaskId), decodeFromAttr(encodedEntityId));
+}
+
+// ── TASK DETAIL MODAL ──
+function openTaskDetail(taskId) {
+  const task = getTask(taskId);
+  if (!task) return;
+  normalizeTask(task);
+  const isManager = APP.role === 'manager';
+  const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user?.id;
+  if (!isManager && !isAssignedCoordinator) {
+    alert('You do not have access to this task.');
+    return;
+  }
   const canUpdateStatus = isManager || isAssignedCoordinator;
+  const canEditEntities = isManager || isAssignedCoordinator;
   const coord = getCoordinator(task.assignedTo);
   const coordinators = getUsersByRole('coordinator');
   const p = calcTaskProgress(task);
@@ -1130,6 +1355,62 @@ function openTaskDetail(taskId) {
   const dbUploads = task.dbRequired && APP.user
     ? DATA.dbCompanies.filter(entry => entry.sourceTaskId === task.id && entry.coordinatorId === APP.user.id)
     : [];
+  const isDbWork = isDatabaseWorkTask(task);
+
+  // Stage 1 + 2 HTML for Database Work tasks
+  let dbWorkSection = '';
+  if (isDbWork) {
+    const entities = task.dbEntities || [];
+    const entityInputId = 'db-entity-name-input-' + toDomSafeId(task.id);
+    const entityRows = entities.map(entity => {
+      const encodedEntityId = encodeForAttr(entity.id);
+      const fileInputId = 'entity-csv-' + toDomSafeId(entity.id);
+      const uploadedBadge = entity.contactsUploaded
+        ? `<span class="badge badge-green">✅ ${entity.contactCount} contacts</span>`
+        : `<span class="badge badge-gray">No upload yet</span>`;
+      return `
+        <div class="card mb-3" style="border:1px solid var(--border)">
+          <div class="card-header" style="padding:var(--sp-3) var(--sp-4)">
+            <div class="d-flex items-center gap-3" style="flex-wrap:wrap">
+              <span class="fw-500">${escapeHtml(entity.name)}</span>
+              ${uploadedBadge}
+              ${entity.subCategory ? `<span class="badge badge-purple">${escapeHtml(entity.subCategory)}</span>` : ''}
+              <span class="text-muted text-sm">by ${escapeHtml(entity.coordinatorName || 'Unknown')}</span>
+            </div>
+            ${canEditEntities ? `<button class="btn btn-ghost btn-sm" onclick="deleteDbEntityByEncoded('${encodedTaskId}','${encodedEntityId}')">🗑️</button>` : ''}
+          </div>
+          ${canEditEntities ? `
+          <div class="card-body" style="padding:var(--sp-3) var(--sp-4)">
+            <div class="text-sm text-muted mb-2">Stage 2: Upload contacts CSV (Name, Email, Company)</div>
+            <div class="form-row">
+              <div class="form-group">
+                <input type="file" class="form-input" id="${fileInputId}" accept=".csv,text/csv">
+              </div>
+              <div class="form-group" style="align-self:flex-end">
+                <button class="btn btn-primary btn-sm" onclick="uploadEntityCsvByEncoded('${encodedTaskId}','${encodedEntityId}')">Upload CSV</button>
+              </div>
+            </div>
+          </div>` : ''}
+        </div>
+      `;
+    }).join('');
+    dbWorkSection = `
+      <hr class="divider">
+      <div class="fw-600 mb-3" style="font-size:14px">🗄️ Database Work Progress</div>
+      <div class="text-sm text-muted mb-3">Sub-category: <strong>${escapeHtml(task.dbSubCategory || '—')}</strong></div>
+      <div class="fw-500 mb-2" style="font-size:13px">Stage 1: Target Entities</div>
+      ${canEditEntities ? `
+      <div class="form-row mb-3">
+        <div class="form-group">
+          <input class="form-input" id="${entityInputId}" placeholder="e.g. ClickUp, IIT Bombay Incubator">
+        </div>
+        <div class="form-group" style="align-self:flex-end">
+          <button class="btn btn-primary btn-sm" onclick="addDbEntity('${escapeHtml(task.id)}')">+ Add Entity</button>
+        </div>
+      </div>` : ''}
+      ${entityRows || '<div class="text-muted text-sm mb-3">No entities added yet.</div>'}
+    `;
+  }
 
   const modal = document.getElementById('task-detail-modal');
   document.getElementById('task-detail-body').innerHTML = `
@@ -1137,6 +1418,7 @@ function openTaskDetail(taskId) {
       ${catBadge(task.category)}
       ${statusBadge(task.status)}
       ${task.dbRequired ? '<span class="badge badge-purple">DB Required</span>' : ''}
+      ${isDbWork ? '<span class="badge badge-yellow">DB Work</span>' : ''}
       <span class="mono text-sm text-muted">${p}% complete</span>
     </div>
 
@@ -1179,7 +1461,7 @@ function openTaskDetail(taskId) {
       </div>` : ''}
     </div>
 
-    ${isAssignedCoordinator && task.dbRequired ? `
+    ${isAssignedCoordinator && task.dbRequired && !isDbWork ? `
       <hr class="divider">
       <div class="fw-600 mb-4" style="font-size:14px">🗂️ DB Upload Required</div>
       <div class="card" style="margin-bottom:var(--sp-4)">
@@ -1203,21 +1485,24 @@ function openTaskDetail(taskId) {
       </div>
     ` : ''}
 
+    ${dbWorkSection}
+
     <hr class="divider">
     <div class="fw-600 mb-4" style="font-size:14px">📊 Sub-tasks & Metrics</div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Metric</th><th>Value</th>${task.subtasks.some(s=>s.target) ? '<th>Target</th><th>Rate</th>' : ''}</tr></thead>
         <tbody>
-          ${task.subtasks.map(s => {
+          ${task.subtasks.length ? task.subtasks.map(s => {
             const rate = s.target ? Math.round((s.value/s.target)*100) : null;
+            const canToggle = isManager || (APP.role === 'coordinator' && task.assignedTo === APP.user?.id);
             return `<tr class="subtask-row">
-              <td>${s.name}</td>
+              <td>${escapeHtml(s.name)}</td>
               <td>
                 ${s.type === 'checkbox'
-                  ? `<span class="badge ${s.value ? 'badge-green' : 'badge-gray'}">${s.value ? '✅ Done' : '❌ Pending'}</span>`
+                  ? `<span id="subtask-badge-${s.id}" class="badge ${s.value ? 'badge-green' : 'badge-gray'}" style="${canToggle ? 'cursor:pointer' : ''}" ${canToggle ? `onclick="toggleSubtask('${task.id}','${s.id}')"` : ''}>${s.value ? '✅ Done' : '❌ Pending'}</span>`
                   : `<input type="number" value="${s.value||0}" min="0"
-                      ${!isManager && task.assignedTo !== (APP.user?.id) ? 'disabled' : ''}
+                      ${!canToggle ? 'disabled' : ''}
                       onchange="updateSubtask('${task.id}','${s.id}',this.value)">`
                 }
               </td>
@@ -1230,7 +1515,7 @@ function openTaskDetail(taskId) {
                   </div>` : '—'}</td>
               ` : ''}
             </tr>`;
-          }).join('')}
+          }).join('') : '<tr><td colspan="4"><div class="text-muted text-sm">No subtasks.</div></td></tr>'}
         </tbody>
       </table>
     </div>
@@ -1238,14 +1523,14 @@ function openTaskDetail(taskId) {
     <hr class="divider">
     <div class="fw-600 mb-4" style="font-size:14px">🕐 Timeline</div>
     <div class="timeline">
-      ${task.timeline.map(tl => `
+      ${task.timeline.length ? task.timeline.map(tl => `
         <div class="timeline-item">
           <div class="timeline-dot ${tl.done ? 'done' : 'pending'}"></div>
           <div class="timeline-date">${tl.date}</div>
           <div class="timeline-title">${tl.title}</div>
           <div class="timeline-body">${tl.body}</div>
         </div>
-      `).join('')}
+      `).join('') : '<div class="text-muted text-sm">No timeline entries.</div>'}
     </div>
 
     <hr class="divider">
@@ -1253,13 +1538,13 @@ function openTaskDetail(taskId) {
     <div id="comment-list-${task.id}">
       ${task.comments.length ? task.comments.map(c => `
         <div class="comment">
-          <div class="avatar" style="width:28px;height:28px;font-size:11px;flex-shrink:0">${c.initials}</div>
+          <div class="avatar" style="width:28px;height:28px;font-size:11px;flex-shrink:0">${escapeHtml(c.initials || '?')}</div>
           <div class="comment-body">
             <div class="comment-header">
-              <span class="comment-name">${c.user}</span>
-              <span class="comment-time">${c.time}</span>
+              <span class="comment-name">${escapeHtml(c.user)}</span>
+              <span class="comment-time">${escapeHtml(c.time)}</span>
             </div>
-            <div class="comment-text">${c.text}</div>
+            <div class="comment-text">${escapeHtml(c.text)}</div>
           </div>
         </div>
       `).join('') : '<div class="text-muted text-sm mb-4">No comments yet.</div>'}
@@ -1278,8 +1563,31 @@ function updateSubtask(taskId, subId, val) {
   const task = getTask(taskId);
   if (!task) return;
   const sub = task.subtasks.find(s => s.id === subId);
-  if (sub) sub.value = parseFloat(val) || 0;
-  if (sub) saveTasks();
+  if (!sub) return;
+  if (sub.type === 'checkbox') {
+    sub.value = val === true || val === 'true' || val === 1;
+  } else {
+    sub.value = parseFloat(val) || 0;
+  }
+  saveTasks();
+}
+
+function toggleSubtask(taskId, subId) {
+  const task = getTask(taskId);
+  if (!task) return;
+  const isManager = APP.role === 'manager';
+  const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user?.id;
+  if (!isManager && !isAssignedCoordinator) return;
+  const sub = task.subtasks.find(s => s.id === subId);
+  if (!sub || sub.type !== 'checkbox') return;
+  sub.value = !sub.value;
+  saveTasks();
+  // Re-render just the badge
+  const badge = document.getElementById('subtask-badge-' + subId);
+  if (badge) {
+    badge.className = 'badge ' + (sub.value ? 'badge-green' : 'badge-gray');
+    badge.textContent = sub.value ? '✅ Done' : '❌ Pending';
+  }
 }
 
 function updateTaskStatus(taskId, status, selectEl) {
@@ -1472,6 +1780,8 @@ function openNewTaskModal() {
     ? coordinators.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')
     : `<option value="" disabled selected>No coordinators yet</option>`;
   const defaultCategory = DATA.categories[0] || '';
+  const subCatOptions = DATA.dbSubCategories.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  const isDbWork = defaultCategory === 'Database Work';
   document.getElementById('new-task-form').innerHTML = `
     <div class="form-group">
       <label class="form-label">Task Name</label>
@@ -1487,7 +1797,7 @@ function openNewTaskModal() {
             <button type="button" class="btn btn-ghost btn-sm" onclick="deleteTaskCategory()">🗑️</button>
           </span>` : ''}
         </label>
-        <select class="form-select" id="nt-cat">
+        <select class="form-select" id="nt-cat" onchange="onTaskCategoryChange(this.value)">
           ${renderTaskCategoryOptions(defaultCategory)}
         </select>
       </div>
@@ -1516,8 +1826,38 @@ function openNewTaskModal() {
         <span>DB required (coordinator must upload CSV: Name, Email, Company before marking Done)</span>
       </label>
     </div>
+
+    <div id="db-work-block" style="display:${isDbWork ? '' : 'none'}">
+      <hr class="divider">
+      <div class="fw-600 mb-2" style="font-size:13px">🗄️ Database Work Settings</div>
+      <div class="text-sm text-muted mb-3">Database Work tasks use Stage 1 entity selection and Stage 2 contact CSV upload.</div>
+      <div class="form-group">
+        <label class="form-label">Sub-category</label>
+        <select class="form-select" id="nt-db-sub-category">
+          <option value="">— Select sub-category —</option>
+          ${subCatOptions}
+        </select>
+      </div>
+    </div>
+
+    <hr class="divider">
+    <div id="subtask-builder-section">
+      ${renderSubtaskBuilder([])}
+    </div>
   `;
   openModal('new-task-modal');
+}
+
+function onTaskCategoryChange(category) {
+  const block = document.getElementById('db-work-block');
+  const dbReqCheck = document.getElementById('nt-db-required');
+  if (!block) return;
+  if (category === 'Database Work') {
+    block.style.display = '';
+    if (dbReqCheck) dbReqCheck.checked = true;
+  } else {
+    block.style.display = 'none';
+  }
 }
 
 function saveNewTask() {
@@ -1528,16 +1868,30 @@ function saveNewTask() {
     alert('Please add a coordinator before assigning tasks.');
     return;
   }
+  const category = document.getElementById('nt-cat')?.value || '';
+  const isDbWork = category === 'Database Work';
+  let dbSubCategory = '';
+  if (isDbWork) {
+    dbSubCategory = document.getElementById('nt-db-sub-category')?.value || '';
+    if (!dbSubCategory) {
+      alert('Please select a sub-category for Database Work task.');
+      return;
+    }
+  }
+  const subtasks = collectSubtasksFromForm();
   const newTask = {
     id: createId('task'),
     name,
-    category: document.getElementById('nt-cat')?.value,
+    category,
     assignedTo,
     status: document.getElementById('nt-status')?.value || 'Not Started',
-    deadline: document.getElementById('nt-deadline')?.value,
-    dbRequired: !!document.getElementById('nt-db-required')?.checked,
+    deadline: document.getElementById('nt-deadline')?.value || '',
+    dbRequired: isDbWork ? true : !!document.getElementById('nt-db-required')?.checked,
+    dbWorkflowEnabled: isDbWork,
+    dbSubCategory: isDbWork ? dbSubCategory : '',
+    dbEntities: [],
     comments: [],
-    subtasks: [],
+    subtasks,
     timeline: [{ date: new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short'}), title: 'Task Created', body: 'Task has been created and assigned', done: true }]
   };
   DATA.tasks.unshift(newTask);
@@ -1551,7 +1905,12 @@ function saveNewTask() {
 function openEditTaskModal(taskId) {
   const task = getTask(taskId);
   if (!task) return;
+  normalizeTask(task);
   const coordinators = getUsersByRole('coordinator');
+  const isDbWork = isDatabaseWorkTask(task);
+  const subCatOptions = DATA.dbSubCategories.map(s =>
+    `<option value="${escapeHtml(s)}" ${task.dbSubCategory === s ? 'selected' : ''}>${escapeHtml(s)}</option>`
+  ).join('');
   document.getElementById('new-task-modal-title').textContent = 'Edit Task';
   document.getElementById('new-task-form').innerHTML = `
     <div class="form-group">
@@ -1568,7 +1927,7 @@ function openEditTaskModal(taskId) {
             <button type="button" class="btn btn-ghost btn-sm" onclick="deleteTaskCategory()">🗑️</button>
           </span>` : ''}
         </label>
-        <select class="form-select" id="nt-cat">
+        <select class="form-select" id="nt-cat" onchange="onTaskCategoryChange(this.value)">
           ${renderTaskCategoryOptions(task.category)}
         </select>
       </div>
@@ -1599,14 +1958,46 @@ function openEditTaskModal(taskId) {
         <span>DB required (coordinator must upload CSV: Name, Email, Company before marking Done)</span>
       </label>
     </div>
+
+    <div id="db-work-block" style="display:${isDbWork ? '' : 'none'}">
+      <hr class="divider">
+      <div class="fw-600 mb-2" style="font-size:13px">🗄️ Database Work Settings</div>
+      <div class="text-sm text-muted mb-3">Database Work tasks use Stage 1 entity selection and Stage 2 contact CSV upload.</div>
+      <div class="form-group">
+        <label class="form-label">Sub-category</label>
+        <select class="form-select" id="nt-db-sub-category">
+          <option value="">— Select sub-category —</option>
+          ${subCatOptions}
+        </select>
+      </div>
+    </div>
+
+    <hr class="divider">
+    <div id="subtask-builder-section">
+      ${renderSubtaskBuilder(task.subtasks)}
+    </div>
   `;
   document.getElementById('save-new-task-btn').onclick = () => {
+    const editCategory = document.getElementById('nt-cat')?.value || task.category;
+    const editIsDbWork = editCategory === 'Database Work';
+    let editDbSubCategory = task.dbSubCategory || '';
+    if (editIsDbWork) {
+      editDbSubCategory = document.getElementById('nt-db-sub-category')?.value || '';
+      if (!editDbSubCategory) {
+        alert('Please select a sub-category for Database Work task.');
+        return;
+      }
+    }
     task.name = document.getElementById('nt-name')?.value?.trim() || task.name;
-    task.category = document.getElementById('nt-cat')?.value;
-    task.assignedTo = document.getElementById('nt-assign')?.value;
-    task.status = document.getElementById('nt-status')?.value;
-    task.deadline = document.getElementById('nt-deadline')?.value;
-    task.dbRequired = !!document.getElementById('nt-db-required')?.checked;
+    task.category = editCategory;
+    task.assignedTo = document.getElementById('nt-assign')?.value || task.assignedTo;
+    task.status = document.getElementById('nt-status')?.value || task.status;
+    task.deadline = document.getElementById('nt-deadline')?.value || '';
+    task.dbRequired = editIsDbWork ? true : !!document.getElementById('nt-db-required')?.checked;
+    task.dbWorkflowEnabled = editIsDbWork;
+    task.dbSubCategory = editIsDbWork ? editDbSubCategory : '';
+    if (!Array.isArray(task.dbEntities)) task.dbEntities = [];
+    task.subtasks = collectSubtasksFromForm();
     saveTasks();
     closeModal('new-task-modal');
     renderTasks();
@@ -3281,6 +3672,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   APP.users = loadUsers();
   console.log('APP INIT: users loaded =', APP.users.length);
   await syncAllAppData();
+  normalizeAllTasks();
   console.log('Tasks available:', DATA.tasks.length);
   hydrateSession();
 
