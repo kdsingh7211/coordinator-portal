@@ -16,6 +16,8 @@ const APP = {
   trackDbViewMode: 'all',
   trackDbStatusFilter: 'all',
   trackDbExpandedCoordinators: {},
+  trackDbExpandedCompanies: {},
+  trackDbSelectedCompanies: {},
   timelineTab: 'task',
   managerTimelineMessage: { type: '', text: '' },
   firebaseDb: null,
@@ -488,6 +490,78 @@ function toDomSafeId(value) {
 
 function normalizeCompanyName(name) {
   return String(name || '').trim().toLowerCase();
+}
+
+function normalizeTrackDbCompanyKey(companyName) {
+  return normalizeCompanyName(companyName);
+}
+
+function getTaskNameById(taskId) {
+  if (!taskId) return '';
+  const task = getTask(taskId);
+  return task ? task.name : '';
+}
+
+function sanitizeFilename(value) {
+  return String(value || 'company')
+    .trim()
+    .replace(/[^a-z0-9\-_ ]/gi, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 80) || 'company';
+}
+
+function escapeCsvCell(value) {
+  const raw = String(value ?? '');
+  if (/[",\n\r]/.test(raw)) {
+    return `"${raw.replace(/"/g, '""')}"`;
+  }
+  return raw;
+}
+
+function rowsToCsv(rows) {
+  return rows.map(row => row.map(escapeCsvCell).join(',')).join('\n');
+}
+
+function getTrackDbCompanyGroups(entries) {
+  const groups = {};
+  entries.forEach(entry => {
+    const companyName = entry.companyName || entry.company || 'Unknown Company';
+    const key = normalizeTrackDbCompanyKey(companyName);
+    if (!groups[key]) {
+      groups[key] = { key, companyName, entries: [], contacts: [] };
+    }
+    groups[key].entries.push(entry);
+    const contacts = Array.isArray(entry.contacts) ? entry.contacts : [];
+    contacts.forEach(contact => {
+      groups[key].contacts.push({
+        name: contact.name || '',
+        email: contact.email || '',
+        company: contact.company || companyName,
+        subCategory: entry.subCategory || '',
+        coordinator: entry.coordinatorName || '',
+        coordinatorId: entry.coordinatorId || '',
+        sourceTask: getTaskNameById(entry.sourceTaskId),
+        status: entry.status || '',
+        comment: entry.comment || ''
+      });
+    });
+  });
+  return Object.values(groups).sort((a, b) => a.companyName.localeCompare(b.companyName));
+}
+
+function getCsvRowsForCompanyGroup(group) {
+  const header = ['Name', 'Email', 'Company', 'Sub Category', 'Coordinator', 'Source Task', 'Status', 'Comment'];
+  const rows = group.contacts.map(contact => [
+    contact.name,
+    contact.email,
+    contact.company,
+    contact.subCategory,
+    contact.coordinator,
+    contact.sourceTask,
+    contact.status,
+    contact.comment
+  ]);
+  return [header, ...rows];
 }
 
 function getTrackDbEntriesForCurrentUser() {
@@ -2761,11 +2835,93 @@ function renderTrackDbTableRows(entries, { showCoordinator = false } = {}) {
   }).join('');
 }
 
+function renderTrackDbCompanyWise(groups) {
+  const selected = APP.trackDbSelectedCompanies || {};
+  const selectedCount = Object.keys(selected).length;
+
+  const controlsHtml = `
+    <div class="d-flex gap-2 mb-4" style="align-items:center;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:var(--sp-2);cursor:pointer">
+        <input type="checkbox" ${selectedCount > 0 && selectedCount === groups.length ? 'checked' : ''}
+          onchange="if(this.checked){selectAllVisibleTrackDbCompanies();}else{clearTrackDbCompanySelection();}">
+        Select All Visible
+      </label>
+      <button class="btn btn-ghost btn-sm" onclick="clearTrackDbCompanySelection()">Clear Selection</button>
+      <span class="text-muted text-sm">${selectedCount} compan${selectedCount !== 1 ? 'ies' : 'y'} selected</span>
+      <button class="btn btn-primary btn-sm" onclick="downloadSelectedCompanyCsvZip()">⬇️ Download Selected CSVs</button>
+    </div>
+  `;
+
+  if (!groups.length) {
+    return `${controlsHtml}<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">No companies found</div></div>`;
+  }
+
+  const groupsHtml = groups.map(group => {
+    const isSelected = !!selected[group.key];
+    const isExpanded = !!(APP.trackDbExpandedCompanies || {})[group.key];
+    const encodedKey = encodeForAttr(group.key);
+    const statuses = [...new Set(group.entries.map(e => e.status).filter(Boolean))];
+    const coordinatorNames = [...new Set(group.entries.map(e => e.coordinatorName || '').filter(Boolean))];
+
+    const contactsHtml = isExpanded ? (
+      group.contacts.length ? `
+        <div class="table-wrap" style="border-top:1px solid var(--border)">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Coordinator</th>
+                <th>Sub-category</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${group.contacts.map(c => `
+                <tr>
+                  <td>${escapeHtml(c.name)}</td>
+                  <td>${escapeHtml(c.email)}</td>
+                  <td>${escapeHtml(c.coordinator)}</td>
+                  <td>${escapeHtml(c.subCategory)}</td>
+                  <td><span class="badge ${dbStatusBadgeClass(c.status)}">${escapeHtml(c.status || '—')}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : `<div class="text-sm text-muted" style="padding:var(--sp-4)">No contacts uploaded for this company yet.</div>`
+    ) : '';
+
+    return `
+      <div class="card mb-3" style="overflow:hidden">
+        <div class="d-flex gap-2" style="align-items:center;padding:var(--sp-3) var(--sp-4);cursor:pointer;user-select:none"
+          onclick="toggleTrackDbCompanyExpandedByEncoded('${encodedKey}')">
+          <input type="checkbox" ${isSelected ? 'checked' : ''}
+            onclick="event.stopPropagation();toggleTrackDbCompanySelectedByEncoded('${encodedKey}', this.checked)"
+            style="cursor:pointer;flex-shrink:0">
+          <span style="flex:1;font-weight:500">${escapeHtml(group.companyName)}</span>
+          <span class="text-muted text-sm">${group.contacts.length} contact${group.contacts.length !== 1 ? 's' : ''}</span>
+          ${coordinatorNames.length ? `<span class="text-muted text-sm" style="margin-left:var(--sp-2)">${coordinatorNames.map(n => escapeHtml(n)).join(', ')}</span>` : ''}
+          ${statuses.map(s => `<span class="badge ${dbStatusBadgeClass(s)}">${escapeHtml(s)}</span>`).join('')}
+          <span style="font-size:12px;margin-left:var(--sp-2)">${isExpanded ? '▲' : '▼'}</span>
+        </div>
+        ${contactsHtml}
+      </div>
+    `;
+  }).join('');
+
+  return `${controlsHtml}<div>${groupsHtml}</div>`;
+}
+
 function renderTrackDb() {
   const el = document.getElementById('page-trackdb');
   if (!el) return;
   const isManager = APP.role === 'manager';
+  if (!isManager && APP.trackDbViewMode === 'grouped') {
+    APP.trackDbViewMode = 'all';
+  }
   const entries = getTrackDbFilteredEntries();
+  const companyGroups = getTrackDbCompanyGroups(entries);
   const coordinators = getUsersByRole('coordinator');
   const grouped = entries.reduce((acc, entry) => {
     const key = entry.coordinatorId || 'unknown';
@@ -2811,14 +2967,13 @@ function renderTrackDb() {
       </div>
     </div>
 
-    ${isManager ? `
-      <div class="tabs" style="margin-bottom:var(--sp-4)">
-        <div class="tab ${APP.trackDbViewMode === 'all' ? 'active' : ''}" onclick="setTrackDbViewMode('all')">All Companies</div>
-        <div class="tab ${APP.trackDbViewMode === 'grouped' ? 'active' : ''}" onclick="setTrackDbViewMode('grouped')">By Coordinator</div>
-      </div>
-    ` : ''}
+    <div class="tabs" style="margin-bottom:var(--sp-4)">
+      <div class="tab ${APP.trackDbViewMode === 'all' ? 'active' : ''}" onclick="setTrackDbViewMode('all')">${isManager ? 'All Companies' : 'All'}</div>
+      ${isManager ? `<div class="tab ${APP.trackDbViewMode === 'grouped' ? 'active' : ''}" onclick="setTrackDbViewMode('grouped')">By Coordinator</div>` : ''}
+      <div class="tab ${APP.trackDbViewMode === 'company' ? 'active' : ''}" onclick="setTrackDbViewMode('company')">By Company</div>
+    </div>
 
-    ${!isManager || APP.trackDbViewMode === 'all' ? `
+    ${APP.trackDbViewMode === 'all' ? `
       <div class="card">
         <div class="card-header">
           <span class="card-title">${isManager ? 'All Companies' : 'My Companies'}</span>
@@ -2875,6 +3030,18 @@ function renderTrackDb() {
         </div>
       </div>
     ` : ''}
+
+    ${APP.trackDbViewMode === 'company' ? `
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">By Company</span>
+          <span class="text-muted text-sm">${companyGroups.length} compan${companyGroups.length !== 1 ? 'ies' : 'y'}</span>
+        </div>
+        <div class="card-body">
+          ${renderTrackDbCompanyWise(companyGroups)}
+        </div>
+      </div>
+    ` : ''}
   `;
 }
 
@@ -2884,7 +3051,8 @@ function setTrackDbStatusFilter(value) {
 }
 
 function setTrackDbViewMode(mode) {
-  APP.trackDbViewMode = mode === 'grouped' ? 'grouped' : 'all';
+  const validModes = APP.role === 'manager' ? ['all', 'grouped', 'company'] : ['all', 'company'];
+  APP.trackDbViewMode = validModes.includes(mode) ? mode : 'all';
   renderTrackDb();
 }
 
@@ -2895,6 +3063,79 @@ function toggleTrackDbCoordinator(coordinatorId) {
 
 function toggleTrackDbCoordinatorByEncoded(encodedCoordinatorId) {
   toggleTrackDbCoordinator(decodeFromAttr(encodedCoordinatorId));
+}
+
+function toggleTrackDbCompanyExpanded(companyKey) {
+  APP.trackDbExpandedCompanies = APP.trackDbExpandedCompanies || {};
+  APP.trackDbExpandedCompanies[companyKey] = !APP.trackDbExpandedCompanies[companyKey];
+  renderTrackDb();
+}
+
+function toggleTrackDbCompanyExpandedByEncoded(encodedKey) {
+  toggleTrackDbCompanyExpanded(decodeFromAttr(encodedKey));
+}
+
+function toggleTrackDbCompanySelected(companyKey, checked) {
+  APP.trackDbSelectedCompanies = APP.trackDbSelectedCompanies || {};
+  if (checked) {
+    APP.trackDbSelectedCompanies[companyKey] = true;
+  } else {
+    delete APP.trackDbSelectedCompanies[companyKey];
+  }
+  renderTrackDb();
+}
+
+function toggleTrackDbCompanySelectedByEncoded(encodedKey, checked) {
+  toggleTrackDbCompanySelected(decodeFromAttr(encodedKey), checked);
+}
+
+function clearTrackDbCompanySelection() {
+  APP.trackDbSelectedCompanies = {};
+  renderTrackDb();
+}
+
+function selectAllVisibleTrackDbCompanies() {
+  APP.trackDbSelectedCompanies = APP.trackDbSelectedCompanies || {};
+  const groups = getTrackDbCompanyGroups(getTrackDbFilteredEntries());
+  groups.forEach(group => { APP.trackDbSelectedCompanies[group.key] = true; });
+  renderTrackDb();
+}
+
+async function downloadSelectedCompanyCsvZip() {
+  const selected = APP.trackDbSelectedCompanies || {};
+  const selectedKeys = Object.keys(selected);
+  if (!selectedKeys.length) {
+    alert('Please select at least one company to download.');
+    return;
+  }
+  if (!window.JSZip) {
+    alert('CSV ZIP export library is not loaded. Please refresh and try again.');
+    return;
+  }
+  const entries = getTrackDbFilteredEntries();
+  const groups = getTrackDbCompanyGroups(entries).filter(group => selected[group.key]);
+  if (!groups.length) {
+    alert('No selected company data found.');
+    return;
+  }
+  const zip = new JSZip();
+  groups.forEach(group => {
+    const rows = getCsvRowsForCompanyGroup(group);
+    const csv = rowsToCsv(rows);
+    const filename = `${sanitizeFilename(group.companyName)}.csv`;
+    zip.file(filename, csv);
+  });
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const date = new Date().toISOString().slice(0, 10);
+  const zipFilename = `track-db-selected-companies-${date}.zip`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = zipFilename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function uploadTrackDbCsv() {
