@@ -492,8 +492,9 @@ function normalizeCompanyName(name) {
   return String(name || '').trim().toLowerCase();
 }
 
+// Alias used by company-wise grouping; delegates to normalizeCompanyName
 function normalizeTrackDbCompanyKey(companyName) {
-  return String(companyName || '').trim().toLowerCase();
+  return normalizeCompanyName(companyName);
 }
 
 function sanitizeFilename(value) {
@@ -3067,8 +3068,8 @@ function renderTrackDbCompanyWise(entries) {
   const allSelected = groups.length > 0 && groups.every(g => selected[g.key]);
   const controls = `
     <div class="d-flex items-center gap-2 mb-4" style="flex-wrap:wrap">
-      <label class="d-flex items-center gap-2 cursor-pointer" style="font-size:13px">
-        <input type="checkbox" ${allSelected ? 'checked' : ''} onchange="handleSelectAllTrackDbCompanies(this.checked)">
+      <label class="d-flex items-center gap-2 cursor-pointer" for="trackdb-select-all-cb" style="font-size:13px">
+        <input type="checkbox" id="trackdb-select-all-cb" ${allSelected ? 'checked' : ''} onchange="handleSelectAllTrackDbCompanies(this.checked)">
         Select All Visible
       </label>
       <button class="btn btn-secondary btn-sm" onclick="clearTrackDbCompanySelection()">Clear Selection</button>
@@ -3103,7 +3104,7 @@ function renderTrackDbCompanyWise(entries) {
       <div class="card mb-4" style="overflow:hidden">
         <div class="trackdb-company-row${isSelected ? ' trackdb-company-selected' : ''}" onclick="toggleTrackDbCompanyExpanded('${encodedKey}')">
           <div class="d-flex items-center gap-2" style="flex:1;min-width:0">
-            <input type="checkbox" class="trackdb-company-checkbox" ${isSelected ? 'checked' : ''}
+            <input type="checkbox" class="trackdb-company-checkbox" aria-label="Select ${escapeHtml(group.companyName)}" ${isSelected ? 'checked' : ''}
               onclick="event.stopPropagation();" onchange="toggleTrackDbCompanySelectedByEncoded('${encodedKey}', this.checked)">
             <div style="flex:1;min-width:0">
               <div class="fw-500">${escapeHtml(group.companyName)}</div>
