@@ -40,6 +40,10 @@ const DATA = {
   pocs: [],
   dbCompanies: [],
   dbSubCategories: DB_SUB_CATEGORIES_DEFAULT.slice(),
+  dbStatusOptions: ['Mail Sent', 'Replied', 'Denied', 'Accepted'],
+  confirmedLeads: [],
+  confirmedLeadCategories: ['Incentive Partner', 'Government Partner', 'Incubator', 'Accelerator', 'VC'],
+  confirmedLeadStages: ['Zonals', 'Finals', 'Other'],
   resources: [
     { id: 'r1', name: 'Cold Email Template', desc: 'Standard outreach email for incubators and startups', type: 'Email Template', icon: '📧', category: 'Templates', url: '#' },
     { id: 'r2', name: 'Follow-up Email #1', desc: 'First follow-up, send 3 days after initial email', type: 'Email Template', icon: '📨', category: 'Templates', url: '#' },
@@ -71,6 +75,10 @@ const DATA_STORAGE_KEYS = {
   pocs: 'cp-pocs',
   dbCompanies: 'cp-db-companies',
   dbSubCategories: 'cp-db-sub-categories',
+  dbStatusOptions: 'cp-db-status-options',
+  confirmedLeads: 'cp-confirmed-leads',
+  confirmedLeadCategories: 'cp-confirmed-lead-categories',
+  confirmedLeadStages: 'cp-confirmed-lead-stages',
   notifications: 'cp-notifications',
   categories: 'cp-categories',
   resources: 'cp-resources'
@@ -82,6 +90,10 @@ const FIREBASE_DATA_PATHS = {
   pocs: 'cp-pocs',
   dbCompanies: 'cp-db-companies',
   dbSubCategories: 'cp-db-sub-categories',
+  dbStatusOptions: 'cp-db-status-options',
+  confirmedLeads: 'cp-confirmed-leads',
+  confirmedLeadCategories: 'cp-confirmed-lead-categories',
+  confirmedLeadStages: 'cp-confirmed-lead-stages',
   notifications: 'cp-notifications',
   categories: 'cp-categories',
   resources: 'cp-resources'
@@ -317,11 +329,15 @@ async function syncAllAppData() {
 function saveTasks() { saveDataCollection('tasks'); }
 function saveDbCompanies() { saveDataCollection('dbCompanies'); }
 function saveDbSubCategories() { saveDataCollection('dbSubCategories'); }
+function saveDbStatusOptions() { saveDataCollection('dbStatusOptions'); }
 function savePocs() { saveDataCollection('pocs'); }
 function saveManagerTimeline() { saveDataCollection('managerTimeline'); }
 function saveNotifications() { saveDataCollection('notifications'); }
 function saveCategories() { saveDataCollection('categories'); }
 function saveResources() { saveDataCollection('resources'); }
+function saveConfirmedLeads() { saveDataCollection('confirmedLeads'); }
+function saveConfirmedLeadCategories() { saveDataCollection('confirmedLeadCategories'); }
+function saveConfirmedLeadStages() { saveDataCollection('confirmedLeadStages'); }
 
 function resetPersistedDataIfNeeded() {
   const version = localStorage.getItem(STORAGE_RESET_VERSION_KEY);
@@ -494,6 +510,108 @@ function normalizeCompanyName(name) {
 
 function normalizeTrackDbCompanyKey(companyName) {
   return normalizeCompanyName(companyName);
+}
+
+// ── DB STATUS OPTION HELPERS ──
+function getDbStatusOptions(currentStatus = '') {
+  const options = Array.isArray(DATA.dbStatusOptions) && DATA.dbStatusOptions.length
+    ? [...DATA.dbStatusOptions]
+    : ['Mail Sent', 'Replied', 'Denied', 'Accepted'];
+  if (currentStatus && !options.includes(currentStatus)) {
+    options.push(currentStatus);
+  }
+  return options;
+}
+
+// ── CONFIRMED LEAD OPTION HELPERS ──
+function getConfirmedLeadCategoryOptions(current = '') {
+  const options = Array.isArray(DATA.confirmedLeadCategories) && DATA.confirmedLeadCategories.length
+    ? [...DATA.confirmedLeadCategories]
+    : ['Incentive Partner', 'Government Partner', 'Incubator', 'Accelerator', 'VC'];
+  if (current && !options.includes(current)) options.push(current);
+  return options;
+}
+
+function getConfirmedLeadStageOptions(current = '') {
+  const options = Array.isArray(DATA.confirmedLeadStages) && DATA.confirmedLeadStages.length
+    ? [...DATA.confirmedLeadStages]
+    : ['Zonals', 'Finals', 'Other'];
+  if (current && !options.includes(current)) options.push(current);
+  return options;
+}
+
+function getPocDisplayName(poc) {
+  if (!poc) return '—';
+  const parts = [poc.name];
+  if (poc.organization) parts.push(poc.organization);
+  else if (poc.email) parts.push(poc.email);
+  return parts.join(' — ');
+}
+
+// ── JSZIP DYNAMIC LOADER ──
+function loadScriptOnce(src, globalName) {
+  return new Promise((resolve, reject) => {
+    if (globalName && window[globalName]) { resolve(window[globalName]); return; }
+    const existing = document.querySelector(`script[data-dynamic-src="${src}"]`);
+    if (existing) {
+      // If the global is already available, the script loaded successfully already.
+      if (globalName && window[globalName]) { resolve(window[globalName]); return; }
+      // If the element has an error marker, reject immediately instead of hanging.
+      if (existing.dataset.loadFailed) { reject(new Error(`Script previously failed to load: ${src}`)); return; }
+      existing.addEventListener('load', () => resolve(globalName ? window[globalName] : true));
+      existing.addEventListener('error', reject);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.dataset.dynamicSrc = src;
+    script.onload = () => resolve(globalName ? window[globalName] : true);
+    script.onerror = (err) => {
+      script.dataset.loadFailed = '1';
+      reject(new Error(`Failed to load script: ${src}`));
+    };
+    document.head.appendChild(script);
+  });
+}
+
+async function ensureJsZipLoaded() {
+  if (window.JSZip) return true;
+  try {
+    await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js', 'JSZip');
+    return !!window.JSZip;
+  } catch (error) {
+    console.warn('JSZip failed to load.', error);
+    return false;
+  }
+}
+
+// ── SCREEN HELPERS ──
+function showBootScreen() {
+  const boot = document.getElementById('boot-screen');
+  const login = document.getElementById('login-page');
+  const app = document.getElementById('app');
+  if (boot) boot.style.display = 'flex';
+  if (login) login.style.display = 'none';
+  if (app) app.style.display = 'none';
+}
+
+function showLoginScreen() {
+  const boot = document.getElementById('boot-screen');
+  const login = document.getElementById('login-page');
+  const app = document.getElementById('app');
+  if (boot) boot.style.display = 'none';
+  if (login) login.style.display = 'flex';
+  if (app) app.style.display = 'none';
+}
+
+function showAppScreen() {
+  const boot = document.getElementById('boot-screen');
+  const login = document.getElementById('login-page');
+  const app = document.getElementById('app');
+  if (boot) boot.style.display = 'none';
+  if (login) login.style.display = 'none';
+  if (app) app.style.display = 'flex';
 }
 
 function getTaskNameById(taskId) {
@@ -906,6 +1024,7 @@ function navigate(page, extra) {
     resources: ['Resources', 'Templates, docs, and links'],
     poc: ['POC', 'Point of contact details'],
     trackdb: ['Track DB', 'Track uploaded database companies'],
+    confirmedleads: ['Confirmed Leads', 'Manager-only confirmed leads tracker'],
     notifications: ['Notifications', 'Updates and alerts'],
     performance: ['Performance', 'Team performance metrics'],
     settings: ['Settings', 'Preferences and account'],
@@ -923,6 +1042,7 @@ function navigate(page, extra) {
     resources: renderResources,
     poc: renderPoc,
     trackdb: renderTrackDb,
+    confirmedleads: renderConfirmedLeads,
     notifications: renderNotifications,
     performance: renderPerformance,
     settings: renderSettings,
@@ -2813,7 +2933,7 @@ function renderTrackDbTableRows(entries, { showCoordinator = false } = {}) {
         ${showCoordinator ? `<td>${escapeHtml(entry.coordinatorName || getCoordinator(entry.coordinatorId)?.name || 'Unknown')}</td>` : ''}
         <td>
           <select class="form-select" ${editable ? '' : 'disabled'} onchange="updateDbCompanyStatusByEncoded('${encodedEntryId}', this.value)">
-            ${DB_STATUS_OPTIONS.map(status => `<option ${entry.status === status ? 'selected' : ''}>${status}</option>`).join('')}
+            ${getDbStatusOptions(entry.status).map(status => `<option ${entry.status === status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}
           </select>
           <div class="mt-1"><span class="badge ${dbStatusBadgeClass(entry.status)}">${escapeHtml(entry.status || '—')}</span></div>
         </td>
@@ -2940,7 +3060,7 @@ function renderTrackDb() {
       <div class="section-actions">
         <select class="form-select" style="height:34px;width:auto" onchange="setTrackDbStatusFilter(this.value)">
           <option value="all" ${APP.trackDbStatusFilter === 'all' ? 'selected' : ''}>All Statuses</option>
-          ${DB_STATUS_OPTIONS.map(status => `<option value="${escapeHtml(status)}" ${APP.trackDbStatusFilter === status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}
+          ${getDbStatusOptions().map(status => `<option value="${escapeHtml(status)}" ${APP.trackDbStatusFilter === status ? 'selected' : ''}>${escapeHtml(status)}</option>`).join('')}
         </select>
       </div>
     </div>
@@ -2972,6 +3092,33 @@ function renderTrackDb() {
       ${isManager ? `<div class="tab ${APP.trackDbViewMode === 'grouped' ? 'active' : ''}" onclick="setTrackDbViewMode('grouped')">By Coordinator</div>` : ''}
       <div class="tab ${APP.trackDbViewMode === 'company' ? 'active' : ''}" onclick="setTrackDbViewMode('company')">By Company</div>
     </div>
+
+    ${isManager ? `
+    <div class="card mb-4">
+      <div class="card-header">
+        <span class="card-title">⚙️ Manage DB Status Options</span>
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          ${getDbStatusOptions().map(status => {
+            const isProtected = status === 'Accepted';
+            const encodedStatus = encodeForAttr(status);
+            return `
+              <div class="d-flex gap-2 mb-2" style="align-items:center;flex-wrap:wrap">
+                <span class="badge badge-gray" style="flex:1;min-width:80px">${escapeHtml(status)}${isProtected ? ' 🔒' : ''}</span>
+                ${!isProtected ? `
+                  <button class="btn btn-ghost btn-sm" onclick="renameDbStatusOption('${encodedStatus}')">✏️ Rename</button>
+                  <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="deleteDbStatusOption('${encodedStatus}')">🗑️</button>
+                ` : `<span class="text-sm text-muted">Protected</span>`}
+              </div>`;
+          }).join('')}
+        </div>
+        <div class="form-row">
+          <input class="form-input" id="new-db-status-input" placeholder="New status name…" style="flex:1">
+          <button class="btn btn-secondary btn-sm" onclick="addDbStatusOption()">+ Add</button>
+        </div>
+      </div>
+    </div>` : ''}
 
     ${APP.trackDbViewMode === 'all' ? `
       <div class="card">
@@ -3050,6 +3197,60 @@ function setTrackDbStatusFilter(value) {
   renderTrackDb();
 }
 
+// ── DB STATUS OPTION MANAGEMENT ──
+function addDbStatusOption() {
+  const input = document.getElementById('new-db-status-input');
+  const value = (input?.value || '').trim();
+  if (!value) { alert('Status name cannot be empty.'); return; }
+  const opts = getDbStatusOptions();
+  if (opts.some(o => o.toLowerCase() === value.toLowerCase())) {
+    alert('A status with this name already exists.');
+    return;
+  }
+  DATA.dbStatusOptions = opts;
+  DATA.dbStatusOptions.push(value);
+  saveDbStatusOptions();
+  renderTrackDb();
+}
+
+function renameDbStatusOption(encodedOldStatus) {
+  const oldStatus = decodeFromAttr(encodedOldStatus);
+  if (oldStatus === 'Accepted') {
+    alert('Accepted is required for confirmed lead workflow and cannot be renamed.');
+    return;
+  }
+  const newName = prompt('Rename status:', oldStatus)?.trim();
+  if (!newName || newName === oldStatus) return;
+  const opts = getDbStatusOptions();
+  if (opts.some(o => o.toLowerCase() === newName.toLowerCase() && o !== oldStatus)) {
+    alert('A status with this name already exists.');
+    return;
+  }
+  const idx = opts.indexOf(oldStatus);
+  if (idx === -1) return;
+  opts[idx] = newName;
+  DATA.dbStatusOptions = opts;
+  saveDbStatusOptions();
+  renderTrackDb();
+}
+
+function deleteDbStatusOption(encodedStatus) {
+  const status = decodeFromAttr(encodedStatus);
+  if (status === 'Accepted') {
+    alert('Accepted is required for confirmed lead workflow and cannot be deleted.');
+    return;
+  }
+  const opts = getDbStatusOptions();
+  if (opts.length <= 1) { alert('Cannot delete the last status option.'); return; }
+  const usedByEntries = DATA.dbCompanies.some(e => e.status === status);
+  if (usedByEntries) {
+    if (!confirm(`This status is used by existing entries. Existing entries will keep showing this status, but it will not appear as a new choice in the dropdown. Continue?`)) return;
+  }
+  DATA.dbStatusOptions = opts.filter(o => o !== status);
+  saveDbStatusOptions();
+  renderTrackDb();
+}
+
 function setTrackDbViewMode(mode) {
   const validModes = APP.role === 'manager' ? ['all', 'grouped', 'company'] : ['all', 'company'];
   APP.trackDbViewMode = validModes.includes(mode) ? mode : 'all';
@@ -3108,8 +3309,9 @@ async function downloadSelectedCompanyCsvZip() {
     alert('Please select at least one company to download.');
     return;
   }
-  if (!window.JSZip) {
-    alert('CSV ZIP export library is not loaded. Please refresh and try again.');
+  const hasJsZip = await ensureJsZipLoaded();
+  if (!hasJsZip) {
+    alert('CSV ZIP export library could not be loaded. Please check your internet connection, disable blockers for this site, refresh, and try again.');
     return;
   }
   const entries = getTrackDbFilteredEntries();
@@ -3202,7 +3404,7 @@ async function promptAndCreatePocForDbCompany(entry) {
 async function updateDbCompanyStatus(companyId, status) {
   const entry = DATA.dbCompanies.find(item => item.id === companyId);
   if (!entry || !canEditDbEntry(entry)) return;
-  if (!DB_STATUS_OPTIONS.includes(status)) return;
+  if (!getDbStatusOptions(entry.status).includes(status)) return;
   const prevStatus = entry.status;
   if (status === 'Accepted' && !entry.pocId) {
     const pocId = await promptAndCreatePocForDbCompany(entry);
@@ -3217,6 +3419,30 @@ async function updateDbCompanyStatus(companyId, status) {
   entry.updatedAt = new Date().toISOString();
   saveDbCompanies();
   if (prevStatus !== status) renderTrackDb();
+
+  // Manager-only: when status becomes Accepted, offer to create Confirmed Lead
+  if (status === 'Accepted' && APP.role === 'manager') {
+    if (entry.confirmedLeadId) {
+      const existingLead = DATA.confirmedLeads.find(l => l.id === entry.confirmedLeadId);
+      if (existingLead) {
+        if (confirm('This entry already has a confirmed lead. Open/edit it?')) {
+          openConfirmedLeadModal(entry.confirmedLeadId);
+        }
+        return;
+      }
+    }
+    // Pre-fill and open confirmed lead modal
+    const matchCategory = getConfirmedLeadCategoryOptions().find(c =>
+      entry.subCategory && c.toLowerCase() === entry.subCategory.toLowerCase()
+    ) || '';
+    APP._pendingConfirmedLeadFromDbEntryId = entry.id;
+    openConfirmedLeadModal('', {
+      organizationName: entry.companyName || '',
+      category: matchCategory,
+      pocId: entry.pocId || '',
+      sourceDbEntryId: entry.id
+    });
+  }
 }
 
 async function updateDbCompanyStatusByEncoded(encodedCompanyId, status) {
@@ -3233,11 +3459,12 @@ async function editDbCompanyEntry(companyId) {
     alert('A company with this name already exists for this coordinator.');
     return;
   }
-  const statusInput = prompt(`Edit status (${DB_STATUS_OPTIONS.join(', ')}):`, entry.status || 'Mail Sent');
+  const currentOptions = getDbStatusOptions(entry.status);
+  const statusInput = prompt(`Edit status (${currentOptions.join(', ')}):`, entry.status || 'Mail Sent');
   if (statusInput === null) return;
   const status = String(statusInput || '').trim();
-  if (!DB_STATUS_OPTIONS.includes(status)) {
-    alert(`Status must be one of: ${DB_STATUS_OPTIONS.join(', ')}.`);
+  if (!currentOptions.includes(status)) {
+    alert(`Status must be one of: ${currentOptions.join(', ')}.`);
     return;
   }
   const commentInput = prompt('Edit comment (optional):', entry.comment || '');
@@ -3619,6 +3846,10 @@ function closeModal(id) {
 // Close modal on backdrop click
 document.addEventListener('click', e => {
   if (e.target.classList.contains('modal-backdrop')) {
+    if (e.target.id === 'confirmed-lead-modal') {
+      closeConfirmedLeadModal();
+      return;
+    }
     e.target.classList.remove('open');
     document.body.style.overflow = '';
   }
@@ -3637,8 +3868,7 @@ function logout() {
   localStorage.removeItem(SESSION_KEY);
   sessionStorage.removeItem(SESSION_KEY); // cleanup for old sessions
   APP.role = null; APP.user = null; APP.passwordChangeUserId = null;
-  document.getElementById('app').style.display = 'none';
-  document.getElementById('login-page').style.display = 'flex';
+  showLoginScreen();
   showLoginStep1();
 }
 
@@ -3796,8 +4026,7 @@ function createSession(user) {
     initials: session.initials,
     role: user.role
   };
-  document.getElementById('login-page').style.display = 'none';
-  document.getElementById('app').style.display = 'flex';
+  showAppScreen();
   initApp();
 }
 
@@ -3890,9 +4119,457 @@ function addNotification(text, options = {}) {
   }
 }
 
+// ── CONFIRMED LEADS ──
+
+function renderConfirmedLeads() {
+  if (APP.role !== 'manager') return;
+  const el = document.getElementById('page-confirmedleads');
+  if (!el) return;
+  const leads = Array.isArray(DATA.confirmedLeads) ? DATA.confirmedLeads : [];
+
+  el.innerHTML = `
+    <div class="section-header">
+      <div>
+        <div class="section-title">Confirmed Leads</div>
+        <div class="section-desc">${leads.length} confirmed lead${leads.length !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="section-actions">
+        <button class="btn btn-primary" onclick="openConfirmedLeadModal()">＋ Add Confirmed Lead</button>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header"><span class="card-title">⚙️ Manage Categories</span></div>
+      <div class="card-body">
+        <div class="d-flex gap-2 mb-3" style="flex-wrap:wrap">
+          ${getConfirmedLeadCategoryOptions().map(cat => {
+            const encoded = encodeForAttr(cat);
+            return `<span class="badge badge-purple" style="display:inline-flex;align-items:center;gap:4px">
+              ${escapeHtml(cat)}
+              <button class="btn-icon" style="font-size:10px;padding:0 2px" onclick="renameConfirmedLeadCategory('${encoded}')">✏️</button>
+              <button class="btn-icon" style="font-size:10px;padding:0 2px;color:var(--danger)" onclick="deleteConfirmedLeadCategory('${encoded}')">✕</button>
+            </span>`;
+          }).join('')}
+        </div>
+        <div class="form-row">
+          <input class="form-input" id="new-lead-category-input" placeholder="New category…" style="flex:1">
+          <button class="btn btn-secondary btn-sm" onclick="addConfirmedLeadCategory()">+ Add</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header"><span class="card-title">⚙️ Manage Stages</span></div>
+      <div class="card-body">
+        <div class="d-flex gap-2 mb-3" style="flex-wrap:wrap">
+          ${getConfirmedLeadStageOptions().map(stage => {
+            const encoded = encodeForAttr(stage);
+            return `<span class="badge badge-blue" style="display:inline-flex;align-items:center;gap:4px">
+              ${escapeHtml(stage)}
+              <button class="btn-icon" style="font-size:10px;padding:0 2px" onclick="renameConfirmedLeadStage('${encoded}')">✏️</button>
+              <button class="btn-icon" style="font-size:10px;padding:0 2px;color:var(--danger)" onclick="deleteConfirmedLeadStage('${encoded}')">✕</button>
+            </span>`;
+          }).join('')}
+        </div>
+        <div class="form-row">
+          <input class="form-input" id="new-lead-stage-input" placeholder="New stage…" style="flex:1">
+          <button class="btn btn-secondary btn-sm" onclick="addConfirmedLeadStage()">+ Add</button>
+        </div>
+      </div>
+    </div>
+
+    ${leads.length ? `
+    <div class="card">
+      <div class="card-header"><span class="card-title">All Confirmed Leads</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Organization</th><th>POC</th><th>Category</th><th>Stage</th>
+            <th>MoU</th><th>Logo</th><th>Deliverables</th><th>Actions</th>
+          </tr></thead>
+          <tbody>
+            ${leads.map(lead => {
+              const poc = DATA.pocs.find(p => p.id === lead.pocId);
+              const delivs = Array.isArray(lead.deliverables) ? lead.deliverables : [];
+              const done = delivs.filter(d => d.completed).length;
+              const mouLink = sanitizeUrl(lead.mouLink || '');
+              const logoLink = sanitizeUrl(lead.logoLink || '');
+              const encodedId = encodeForAttr(lead.id);
+              return `<tr>
+                <td class="td-main">${escapeHtml(lead.organizationName || '—')}</td>
+                <td>${poc ? escapeHtml(getPocDisplayName(poc)) : '<span class="text-muted">—</span>'}</td>
+                <td>${lead.category ? `<span class="badge badge-purple">${escapeHtml(lead.category)}</span>` : '—'}</td>
+                <td>${lead.stage ? `<span class="badge badge-blue">${escapeHtml(lead.stage)}</span>` : '—'}</td>
+                <td>${mouLink !== '#' ? `<a href="${mouLink}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm">Open MoU</a>` : '—'}</td>
+                <td>${logoLink !== '#' ? `<a href="${logoLink}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm">Open Logo</a>` : '—'}</td>
+                <td>
+                  <span class="badge badge-gray">${done}/${delivs.length} done</span>
+                  ${delivs.map(d => `
+                    <div class="d-flex gap-1 mt-1" style="align-items:center;font-size:12px">
+                      <input type="checkbox" ${d.completed ? 'checked' : ''} onchange="toggleConfirmedLeadDeliverable('${encodedId}','${encodeForAttr(d.id)}',this.checked)">
+                      <span style="${d.completed ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">${escapeHtml(d.text)}</span>
+                    </div>`).join('')}
+                </td>
+                <td>
+                  <div class="d-flex gap-2">
+                    <button class="btn btn-ghost btn-sm" onclick="openConfirmedLeadModal('${encodedId}')">✏️ Edit</button>
+                    <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="deleteConfirmedLead('${encodedId}')">🗑️</button>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>` : `
+    <div class="card">
+      <div class="empty-state">
+        <div class="empty-icon">🏆</div>
+        <div class="empty-title">No confirmed leads yet</div>
+        <div class="empty-desc">Add a confirmed lead manually or mark a Track DB company as Accepted.</div>
+      </div>
+    </div>`}
+  `;
+}
+
+function openConfirmedLeadModal(encodedLeadId = '', prefill = {}) {
+  if (APP.role !== 'manager') return;
+  const leadId = encodedLeadId ? decodeFromAttr(encodedLeadId) : '';
+  const existingLead = leadId ? DATA.confirmedLeads.find(l => l.id === leadId) : null;
+  const lead = existingLead || {
+    organizationName: prefill.organizationName || '',
+    pocId: prefill.pocId || '',
+    category: prefill.category || '',
+    stage: '',
+    mouLink: '',
+    logoLink: '',
+    deliverables: [],
+    sourceDbEntryId: prefill.sourceDbEntryId || ''
+  };
+
+  document.getElementById('confirmed-lead-modal-title').textContent = existingLead ? 'Edit Confirmed Lead' : 'New Confirmed Lead';
+  const encodedLead = leadId ? encodeForAttr(leadId) : '';
+  document.getElementById('save-confirmed-lead-btn').onclick = () => saveConfirmedLeadFromModal(encodedLead, prefill.sourceDbEntryId);
+
+  const pocs = Array.isArray(DATA.pocs) ? DATA.pocs : [];
+  const categories = getConfirmedLeadCategoryOptions(lead.category);
+  const stages = getConfirmedLeadStageOptions(lead.stage);
+  const delivs = Array.isArray(lead.deliverables) ? lead.deliverables : [];
+
+  document.getElementById('confirmed-lead-modal-body').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">Company / Organization Name *</label>
+      <input class="form-input" id="cl-org-name" value="${escapeHtml(lead.organizationName)}" placeholder="Organization name">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">POC</label>
+      <select class="form-select" id="cl-poc-select">
+        <option value="">— Select POC —</option>
+        ${pocs.map(p => `<option value="${p.id}" ${lead.pocId === p.id ? 'selected' : ''}>${escapeHtml(getPocDisplayName(p))}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Category</label>
+      <select class="form-select" id="cl-category-select">
+        <option value="">— Select Category —</option>
+        ${categories.map(c => `<option value="${escapeHtml(c)}" ${lead.category === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Stage</label>
+      <select class="form-select" id="cl-stage-select">
+        <option value="">— Select Stage —</option>
+        ${stages.map(s => `<option value="${escapeHtml(s)}" ${lead.stage === s ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">MoU</label>
+      <div class="d-flex gap-2 mb-2">
+        <a href="https://drive.google.com/drive/folders/1KFP0EkWOG0XQ59NoFCDhpKlxUElRmP-p?usp=sharing" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">📂 Open MoU Drive Folder</a>
+        ${sanitizeUrl(lead.mouLink || '') !== '#' ? `<a href="${sanitizeUrl(lead.mouLink)}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm">Open MoU</a>` : ''}
+      </div>
+      <input class="form-input" id="cl-mou-link" placeholder="Paste MoU file link after uploading to Drive…" value="${escapeHtml(lead.mouLink || '')}">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Logo</label>
+      <div class="d-flex gap-2 mb-2">
+        <a href="https://drive.google.com/drive/folders/1y3D9kqaaU1LiJWT6ra_9LDnI7NrfDXgl?usp=sharing" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm">📂 Open Logo Drive Folder</a>
+        ${sanitizeUrl(lead.logoLink || '') !== '#' ? `<a href="${sanitizeUrl(lead.logoLink)}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm">Open Logo</a>` : ''}
+      </div>
+      <input class="form-input" id="cl-logo-link" placeholder="Paste Logo file link after uploading to Drive…" value="${escapeHtml(lead.logoLink || '')}">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Deliverables</label>
+      <div id="cl-deliverables-list">
+        ${delivs.map((d, idx) => renderDeliverableRow(d, idx)).join('')}
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm mt-2" onclick="addConfirmedLeadDeliverableRow()">+ Add Deliverable</button>
+    </div>
+  `;
+
+  openModal('confirmed-lead-modal');
+}
+
+function renderDeliverableRow(d, idx) {
+  return `
+    <div class="form-row cl-deliverable-row" data-cl-deliv-idx="${idx}" style="align-items:center;margin-bottom:6px">
+      <input type="checkbox" ${d.completed ? 'checked' : ''} id="cl-deliv-done-${idx}" style="flex-shrink:0;cursor:pointer">
+      <input class="form-input" id="cl-deliv-text-${idx}" value="${escapeHtml(d.text || '')}" placeholder="Deliverable…" style="flex:1">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="removeConfirmedLeadDeliverableRow(${idx})" style="flex-shrink:0">🗑️</button>
+    </div>`;
+}
+
+function addConfirmedLeadDeliverableRow() {
+  const list = document.getElementById('cl-deliverables-list');
+  if (!list) return;
+  const rows = list.querySelectorAll('.cl-deliverable-row');
+  const idx = rows.length;
+  const div = document.createElement('div');
+  div.innerHTML = renderDeliverableRow({ text: '', completed: false }, idx);
+  list.appendChild(div.firstElementChild);
+}
+
+function removeConfirmedLeadDeliverableRow(idx) {
+  const row = document.querySelector(`.cl-deliverable-row[data-cl-deliv-idx="${idx}"]`);
+  if (row) row.remove();
+}
+
+function collectConfirmedLeadDeliverablesFromForm() {
+  const rows = document.querySelectorAll('.cl-deliverable-row');
+  const delivs = [];
+  rows.forEach(row => {
+    const idx = row.dataset.clDelivIdx;
+    const textEl = document.getElementById('cl-deliv-text-' + idx);
+    const doneEl = document.getElementById('cl-deliv-done-' + idx);
+    const text = textEl?.value?.trim() || '';
+    if (!text) return;
+    delivs.push({ id: createId('deliverable'), text, completed: !!(doneEl?.checked) });
+  });
+  return delivs;
+}
+
+function saveConfirmedLeadFromModal(encodedLeadId = '', sourceDbEntryId = '') {
+  const leadId = encodedLeadId ? decodeFromAttr(encodedLeadId) : '';
+  const orgName = (document.getElementById('cl-org-name')?.value || '').trim();
+  if (!orgName) { alert('Organization name is required.'); return; }
+
+  const pocId = document.getElementById('cl-poc-select')?.value || '';
+  const pocEntry = DATA.pocs.find(p => p.id === pocId);
+  const category = document.getElementById('cl-category-select')?.value || '';
+  const stage = document.getElementById('cl-stage-select')?.value || '';
+  const mouLink = (document.getElementById('cl-mou-link')?.value || '').trim();
+  const logoLink = (document.getElementById('cl-logo-link')?.value || '').trim();
+  const deliverables = collectConfirmedLeadDeliverablesFromForm();
+
+  const now = new Date().toISOString();
+
+  if (leadId) {
+    const lead = DATA.confirmedLeads.find(l => l.id === leadId);
+    if (!lead) { alert('Lead not found.'); return; }
+    lead.organizationName = orgName;
+    lead.pocId = pocId;
+    lead.pocName = pocEntry ? pocEntry.name : '';
+    lead.category = category;
+    lead.stage = stage;
+    lead.mouLink = mouLink;
+    lead.logoLink = logoLink;
+    lead.deliverables = deliverables;
+    lead.updatedAt = now;
+    saveConfirmedLeads();
+    closeConfirmedLeadModal();
+    renderConfirmedLeads();
+    return;
+  }
+
+  const dbEntryId = sourceDbEntryId || (APP._pendingConfirmedLeadFromDbEntryId || '');
+  const lead = {
+    id: createId('confirmed-lead'),
+    organizationName: orgName,
+    pocId,
+    pocName: pocEntry ? pocEntry.name : '',
+    category,
+    stage,
+    mouLink,
+    logoLink,
+    deliverables,
+    sourceDbEntryId: dbEntryId,
+    createdAt: now,
+    updatedAt: now,
+    createdBy: APP.user?.id || '',
+    createdByName: APP.user?.name || ''
+  };
+  DATA.confirmedLeads.unshift(lead);
+  saveConfirmedLeads();
+
+  // Link to DB entry if applicable
+  if (dbEntryId) {
+    const dbEntry = DATA.dbCompanies.find(e => e.id === dbEntryId);
+    if (dbEntry) {
+      dbEntry.confirmedLeadId = lead.id;
+      saveDbCompanies();
+    }
+    APP._pendingConfirmedLeadFromDbEntryId = '';
+  }
+
+  closeConfirmedLeadModal();
+  addNotification(`Confirmed Lead added: ${escapeHtml(orgName)}.`);
+  navigate('confirmedleads');
+}
+
+function closeConfirmedLeadModal() {
+  const pendingDbEntryId = APP._pendingConfirmedLeadFromDbEntryId || '';
+  if (pendingDbEntryId) {
+    // Came from Accepted DB entry flow - ask whether to keep Accepted status
+    const keepAccepted = confirm('Confirmed lead details were not saved. Keep the entry status as Accepted?');
+    if (!keepAccepted) {
+      const dbEntry = DATA.dbCompanies.find(e => e.id === pendingDbEntryId);
+      if (dbEntry) {
+        dbEntry.status = 'Mail Sent';
+        dbEntry.updatedAt = new Date().toISOString();
+        saveDbCompanies();
+        if (APP.currentPage === 'trackdb') renderTrackDb();
+      }
+    }
+    APP._pendingConfirmedLeadFromDbEntryId = '';
+  }
+  closeModal('confirmed-lead-modal');
+}
+
+function deleteConfirmedLead(encodedLeadId) {
+  const leadId = decodeFromAttr(encodedLeadId);
+  const idx = DATA.confirmedLeads.findIndex(l => l.id === leadId);
+  if (idx === -1) return;
+  if (!confirm('Delete this confirmed lead?')) return;
+  const lead = DATA.confirmedLeads[idx];
+  // Unlink from DB entry
+  if (lead.sourceDbEntryId) {
+    const dbEntry = DATA.dbCompanies.find(e => e.id === lead.sourceDbEntryId);
+    if (dbEntry && dbEntry.confirmedLeadId === lead.id) {
+      delete dbEntry.confirmedLeadId;
+      saveDbCompanies();
+    }
+  }
+  DATA.confirmedLeads.splice(idx, 1);
+  saveConfirmedLeads();
+  renderConfirmedLeads();
+}
+
+function toggleConfirmedLeadDeliverable(encodedLeadId, encodedDeliverableId, completed) {
+  const leadId = decodeFromAttr(encodedLeadId);
+  const deliverableId = decodeFromAttr(encodedDeliverableId);
+  const lead = DATA.confirmedLeads.find(l => l.id === leadId);
+  if (!lead) return;
+  const deliv = Array.isArray(lead.deliverables) && lead.deliverables.find(d => d.id === deliverableId);
+  if (!deliv) return;
+  deliv.completed = !!completed;
+  lead.updatedAt = new Date().toISOString();
+  saveConfirmedLeads();
+  renderConfirmedLeads();
+}
+
+// ── CONFIRMED LEAD CATEGORY MANAGEMENT ──
+function addConfirmedLeadCategory() {
+  const input = document.getElementById('new-lead-category-input');
+  const value = (input?.value || '').trim();
+  if (!value) { alert('Category name cannot be empty.'); return; }
+  const opts = getConfirmedLeadCategoryOptions();
+  if (opts.some(o => o.toLowerCase() === value.toLowerCase())) {
+    alert('A category with this name already exists.');
+    return;
+  }
+  DATA.confirmedLeadCategories = opts;
+  DATA.confirmedLeadCategories.push(value);
+  saveConfirmedLeadCategories();
+  renderConfirmedLeads();
+}
+
+function renameConfirmedLeadCategory(encodedCategory) {
+  const oldCat = decodeFromAttr(encodedCategory);
+  const newName = prompt('Rename category:', oldCat)?.trim();
+  if (!newName || newName === oldCat) return;
+  const opts = getConfirmedLeadCategoryOptions();
+  if (opts.some(o => o.toLowerCase() === newName.toLowerCase() && o !== oldCat)) {
+    alert('A category with this name already exists.');
+    return;
+  }
+  const idx = opts.indexOf(oldCat);
+  if (idx === -1) return;
+  opts[idx] = newName;
+  DATA.confirmedLeadCategories = opts;
+  saveConfirmedLeadCategories();
+  renderConfirmedLeads();
+}
+
+function deleteConfirmedLeadCategory(encodedCategory) {
+  const cat = decodeFromAttr(encodedCategory);
+  const opts = getConfirmedLeadCategoryOptions();
+  if (opts.length <= 1) { alert('Cannot delete the last category.'); return; }
+  const usedByLeads = DATA.confirmedLeads.some(l => l.category === cat);
+  if (usedByLeads) {
+    if (!confirm(`This category is used by existing leads. Existing leads keep it, but it will be removed from future dropdowns. Continue?`)) return;
+  }
+  DATA.confirmedLeadCategories = opts.filter(o => o !== cat);
+  saveConfirmedLeadCategories();
+  renderConfirmedLeads();
+}
+
+// ── CONFIRMED LEAD STAGE MANAGEMENT ──
+function addConfirmedLeadStage() {
+  const input = document.getElementById('new-lead-stage-input');
+  const value = (input?.value || '').trim();
+  if (!value) { alert('Stage name cannot be empty.'); return; }
+  const opts = getConfirmedLeadStageOptions();
+  if (opts.some(o => o.toLowerCase() === value.toLowerCase())) {
+    alert('A stage with this name already exists.');
+    return;
+  }
+  DATA.confirmedLeadStages = opts;
+  DATA.confirmedLeadStages.push(value);
+  saveConfirmedLeadStages();
+  renderConfirmedLeads();
+}
+
+function renameConfirmedLeadStage(encodedStage) {
+  const oldStage = decodeFromAttr(encodedStage);
+  const newName = prompt('Rename stage:', oldStage)?.trim();
+  if (!newName || newName === oldStage) return;
+  const opts = getConfirmedLeadStageOptions();
+  if (opts.some(o => o.toLowerCase() === newName.toLowerCase() && o !== oldStage)) {
+    alert('A stage with this name already exists.');
+    return;
+  }
+  const idx = opts.indexOf(oldStage);
+  if (idx === -1) return;
+  opts[idx] = newName;
+  DATA.confirmedLeadStages = opts;
+  saveConfirmedLeadStages();
+  renderConfirmedLeads();
+}
+
+function deleteConfirmedLeadStage(encodedStage) {
+  const stage = decodeFromAttr(encodedStage);
+  const opts = getConfirmedLeadStageOptions();
+  if (opts.length <= 1) { alert('Cannot delete the last stage.'); return; }
+  const usedByLeads = DATA.confirmedLeads.some(l => l.stage === stage);
+  if (usedByLeads) {
+    if (!confirm(`This stage is used by existing leads. Existing leads keep it, but it will be removed from future dropdowns. Continue?`)) return;
+  }
+  DATA.confirmedLeadStages = opts.filter(o => o !== stage);
+  saveConfirmedLeadStages();
+  renderConfirmedLeads();
+}
+
 // ── STARTUP ──
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('APP INIT START');
+  showBootScreen();
+
   const loginForm = document.getElementById('login-form');
   if (loginForm) {
     loginForm.addEventListener('submit', async (event) => {
@@ -3918,12 +4595,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   hydrateSession();
 
   if (APP.role && APP.user) {
-    document.getElementById('login-page').style.display = 'none';
-    document.getElementById('app').style.display = 'flex';
+    showAppScreen();
     initApp();
   } else {
-    document.getElementById('login-page').style.display = 'flex';
-    document.getElementById('app').style.display = 'none';
+    showLoginScreen();
     showLoginStep1();
   }
 
