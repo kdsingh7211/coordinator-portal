@@ -554,6 +554,10 @@ function loadScriptOnce(src, globalName) {
     if (globalName && window[globalName]) { resolve(window[globalName]); return; }
     const existing = document.querySelector(`script[data-dynamic-src="${src}"]`);
     if (existing) {
+      // If the global is already available, the script loaded successfully already.
+      if (globalName && window[globalName]) { resolve(window[globalName]); return; }
+      // If the element has an error marker, reject immediately instead of hanging.
+      if (existing.dataset.loadFailed) { reject(new Error(`Script previously failed to load: ${src}`)); return; }
       existing.addEventListener('load', () => resolve(globalName ? window[globalName] : true));
       existing.addEventListener('error', reject);
       return;
@@ -563,7 +567,10 @@ function loadScriptOnce(src, globalName) {
     script.async = true;
     script.dataset.dynamicSrc = src;
     script.onload = () => resolve(globalName ? window[globalName] : true);
-    script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+    script.onerror = (err) => {
+      script.dataset.loadFailed = '1';
+      reject(new Error(`Failed to load script: ${src}`));
+    };
     document.head.appendChild(script);
   });
 }
@@ -3237,7 +3244,7 @@ function deleteDbStatusOption(encodedStatus) {
   if (opts.length <= 1) { alert('Cannot delete the last status option.'); return; }
   const usedByEntries = DATA.dbCompanies.some(e => e.status === status);
   if (usedByEntries) {
-    if (!confirm(`This status is used by existing entries. Existing entries will keep this status, but it will be removed from future dropdowns. Continue?`)) return;
+    if (!confirm(`This status is used by existing entries. Existing entries will keep showing this status, but it will not appear as a new choice in the dropdown. Continue?`)) return;
   }
   DATA.dbStatusOptions = opts.filter(o => o !== status);
   saveDbStatusOptions();
