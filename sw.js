@@ -2,7 +2,7 @@
 // SERVICE WORKER — Eureka! Workplace
 // ===========================
 
-const CACHE_NAME = 'eureka-workplace-v6';
+const CACHE_NAME = 'eureka-workplace-v7';
 const ASSETS = [
   '/',
   '/index.html',

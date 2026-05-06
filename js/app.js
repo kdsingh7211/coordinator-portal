@@ -549,6 +549,78 @@ function getConfirmedLeadStageOptions(current = '') {
   return options;
 }
 
+// ── CONFIRMED LEAD PERMISSION / VISIBILITY HELPERS ──
+function getVisibleConfirmedLeads() {
+  if (APP.role === 'manager') return DATA.confirmedLeads || [];
+  if (APP.role === 'coordinator') {
+    return (DATA.confirmedLeads || []).filter(lead =>
+      lead.coordinatorId === APP.user?.id ||
+      lead.createdBy === APP.user?.id
+    );
+  }
+  return [];
+}
+
+function canEditConfirmedLead(lead) {
+  if (!APP.user || !lead) return false;
+  if (APP.role === 'manager') return true;
+  return lead.coordinatorId === APP.user.id || lead.createdBy === APP.user.id;
+}
+
+function canDeleteConfirmedLead(lead) {
+  return canEditConfirmedLead(lead);
+}
+
+// ── CONFIRMED LEAD POC FILTERING ──
+function getPocsForConfirmedLeadSelection() {
+  if (APP.role === 'manager') {
+    return typeof getVisiblePocs === 'function' ? getVisiblePocs() : (DATA.pocs || []);
+  }
+  if (APP.role === 'coordinator') {
+    return (DATA.pocs || []).filter(poc =>
+      poc.createdBy === APP.user?.id ||
+      poc.coordinatorId === APP.user?.id
+    );
+  }
+  return [];
+}
+
+// ── NORMALIZE CONFIRMED LEAD ──
+function normalizeConfirmedLead(lead) {
+  if (!lead) return lead;
+  if (!lead.coordinatorId) lead.coordinatorId = lead.createdBy || '';
+  if (!lead.coordinatorName) lead.coordinatorName = lead.createdByName || '';
+  if (!lead.createdBy) lead.createdBy = lead.coordinatorId || '';
+  if (!lead.createdByName) lead.createdByName = lead.coordinatorName || '';
+  if (!lead.createdByRole) lead.createdByRole = '';
+  if (!Array.isArray(lead.deliverables)) lead.deliverables = [];
+  lead.deliverables.forEach(d => {
+    if (!d.id) d.id = createId('deliverable');
+    if (!d.stage) d.stage = lead.stage || 'Other';
+    if (typeof d.completed !== 'boolean') d.completed = !!d.completed;
+  });
+  return lead;
+}
+
+function normalizeAllConfirmedLeads() {
+  (DATA.confirmedLeads || []).forEach(normalizeConfirmedLead);
+}
+
+// ── COORDINATOR CHECKBOX LIST HELPER ──
+function renderCoordinatorCheckboxes(selectedIds) {
+  const coordinators = getUsersByRole('coordinator');
+  if (!coordinators.length) {
+    return '<div class="text-muted text-sm">No coordinators available yet.</div>';
+  }
+  const ids = Array.isArray(selectedIds) ? selectedIds : [];
+  return coordinators.map(c => `
+    <label class="d-flex items-center gap-2 mb-2" style="font-size:13px;cursor:pointer">
+      <input type="checkbox" class="task-assignee-checkbox" value="${c.id}" ${ids.includes(c.id) ? 'checked' : ''}>
+      <div class="avatar" style="width:20px;height:20px;font-size:9px;flex-shrink:0">${escapeHtml(c.initials)}</div>
+      <span>${escapeHtml(c.name)}</span>
+    </label>`).join('');
+}
+
 function getPocDisplayName(poc) {
   if (!poc) return '—';
   const parts = [poc.name];
@@ -1567,12 +1639,8 @@ function openTaskDetail(taskId) {
   const canEditEntities = isManager || isAssignedCoordinator;
   const assigneeIds = getTaskAssigneeIds(task);
   const assigneeNames = assigneeIds.map(id => getCoordinator(id)?.name || 'Unknown').filter(Boolean);
-  const coordinators = getUsersByRole('coordinator');
   const p = calcTaskProgress(task);
   const encodedTaskId = encodeForAttr(task.id);
-  const coordinatorOptions = coordinators.length
-    ? coordinators.map(c => `<option value="${c.id}" ${task.assignedTo === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')
-    : '<option value="">No coordinators available</option>';
   const taskDbFileInputId = `task-db-file-${toDomSafeId(task.id)}`;
   const dbUploads = task.dbRequired && APP.user
     ? DATA.dbCompanies.filter(entry => entry.sourceTaskId === task.id && entry.coordinatorId === APP.user.id)
@@ -1678,10 +1746,11 @@ function openTaskDetail(taskId) {
         </select>
       </div>` : ''}
       ${isManager ? `<div class="meta-item">
-        <div class="meta-key">Reassign Coordinator</div>
-        <select class="form-select mt-2" onchange="updateTaskAssignmentByEncoded('${encodedTaskId}', this.value, this)" ${coordinators.length ? '' : 'disabled'}>
-          ${coordinatorOptions}
-        </select>
+        <div class="meta-key">Reassign Coordinators</div>
+        <div class="mt-2" style="border:1px solid var(--border);border-radius:6px;padding:var(--sp-3);max-height:160px;overflow-y:auto">
+          ${renderCoordinatorCheckboxes(assigneeIds)}
+        </div>
+        <button class="btn btn-secondary btn-sm mt-2" onclick="saveTaskDetailAssignees('${encodedTaskId}')">Save Assignment</button>
       </div>` : ''}
     </div>
 
@@ -1850,6 +1919,7 @@ function updateTaskAssignment(taskId, assignedTo, selectEl) {
   }
   const previousAssignee = getCoordinator(task.assignedTo);
   task.assignedTo = assignedTo;
+  task.assignedToIds = [assignedTo];
   console.log('Assigned task to coordinator id:', assignedTo);
   task.timeline.unshift({
     date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
@@ -1864,8 +1934,46 @@ function updateTaskAssignment(taskId, assignedTo, selectEl) {
   openTaskDetail(taskId);
 }
 
+function updateTaskAssignees(taskId, assignedToIds) {
+  const task = getTask(taskId);
+  if (!task || APP.role !== 'manager') return;
+  if (!Array.isArray(assignedToIds) || !assignedToIds.length) {
+    alert('Please select at least one coordinator.');
+    return;
+  }
+  const validIds = assignedToIds.filter(id => {
+    const u = getUserById(id);
+    return u && u.role === 'coordinator';
+  });
+  if (!validIds.length) {
+    alert('Please select at least one valid coordinator.');
+    return;
+  }
+  const prevNames = getTaskAssigneeIds(task).map(id => getCoordinator(id)?.name || 'Unknown').join(', ');
+  task.assignedToIds = validIds;
+  task.assignedTo = validIds[0] || '';
+  const newNames = validIds.map(id => getCoordinator(id)?.name || 'Unknown').join(', ');
+  task.timeline.unshift({
+    date: new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }),
+    title: 'Assignees Updated',
+    body: `Changed from ${prevNames || 'Unassigned'} to ${newNames}.`,
+    done: true
+  });
+  addNotification(`Task "${escapeHtml(task.name)}" assignees updated to ${escapeHtml(newNames)}.`, { browser: true });
+  saveTasks();
+  renderTasks(window._currentTaskFilter || 'all');
+  renderDashboard();
+  openTaskDetail(taskId);
+}
+
 function updateTaskAssignmentByEncoded(encodedTaskId, assignedTo, selectEl) {
   updateTaskAssignment(decodeFromAttr(encodedTaskId), assignedTo, selectEl);
+}
+
+function saveTaskDetailAssignees(encodedTaskId) {
+  const taskId = decodeFromAttr(encodedTaskId);
+  const selectedIds = Array.from(document.querySelectorAll('.task-assignee-checkbox:checked')).map(el => el.value);
+  updateTaskAssignees(taskId, selectedIds);
 }
 
 async function uploadTaskDbCsv(taskId) {
@@ -1999,10 +2107,6 @@ function deleteTaskCategory() {
 
 function openNewTaskModal() {
   const modal = document.getElementById('new-task-modal');
-  const coordinators = getUsersByRole('coordinator');
-  const coordinatorOptions = coordinators.length
-    ? coordinators.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')
-    : `<option value="" disabled selected>No coordinators yet</option>`;
   const defaultCategory = DATA.categories[0] || '';
   const subCatOptions = DATA.dbSubCategories.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
   const isDbWork = defaultCategory === 'Database Work';
@@ -2026,10 +2130,10 @@ function openNewTaskModal() {
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Assigned To</label>
-        <select class="form-select" id="nt-assign">
-          ${coordinatorOptions}
-        </select>
+        <label class="form-label">Assign To (select one or more)</label>
+        <div class="coordinator-checkbox-list" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:var(--sp-3)">
+          ${renderCoordinatorCheckboxes([])}
+        </div>
       </div>
     </div>
     <div class="form-row">
@@ -2087,9 +2191,9 @@ function onTaskCategoryChange(category) {
 function saveNewTask() {
   const name = document.getElementById('nt-name')?.value?.trim();
   if (!name) { alert('Please enter a task name'); return; }
-  const assignedTo = document.getElementById('nt-assign')?.value || '';
-  if (!assignedTo) {
-    alert('Please add a coordinator before assigning tasks.');
+  const assignedToIds = Array.from(document.querySelectorAll('.task-assignee-checkbox:checked')).map(input => input.value);
+  if (!assignedToIds.length) {
+    alert('Please select at least one coordinator.');
     return;
   }
   const category = document.getElementById('nt-cat')?.value || '';
@@ -2107,7 +2211,8 @@ function saveNewTask() {
     id: createId('task'),
     name,
     category,
-    assignedTo,
+    assignedTo: assignedToIds[0] || '',
+    assignedToIds,
     status: document.getElementById('nt-status')?.value || 'Not Started',
     deadline: document.getElementById('nt-deadline')?.value || '',
     dbRequired: isDbWork ? true : !!document.getElementById('nt-db-required')?.checked,
@@ -2130,7 +2235,7 @@ function openEditTaskModal(taskId) {
   const task = getTask(taskId);
   if (!task) return;
   normalizeTask(task);
-  const coordinators = getUsersByRole('coordinator');
+  const currentAssigneeIds = getTaskAssigneeIds(task);
   const isDbWork = isDatabaseWorkTask(task);
   const subCatOptions = DATA.dbSubCategories.map(s =>
     `<option value="${escapeHtml(s)}" ${task.dbSubCategory === s ? 'selected' : ''}>${escapeHtml(s)}</option>`
@@ -2156,12 +2261,10 @@ function openEditTaskModal(taskId) {
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Assigned To</label>
-        <select class="form-select" id="nt-assign">
-          ${coordinators.length
-            ? coordinators.map(c => `<option value="${c.id}" ${task.assignedTo===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')
-            : `<option value="" disabled selected>No coordinators yet</option>`}
-        </select>
+        <label class="form-label">Assign To (select one or more)</label>
+        <div class="coordinator-checkbox-list" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:var(--sp-3)">
+          ${renderCoordinatorCheckboxes(currentAssigneeIds)}
+        </div>
       </div>
     </div>
     <div class="form-row">
@@ -2212,9 +2315,15 @@ function openEditTaskModal(taskId) {
         return;
       }
     }
+    const editAssignedToIds = Array.from(document.querySelectorAll('.task-assignee-checkbox:checked')).map(input => input.value);
+    if (!editAssignedToIds.length) {
+      alert('Please select at least one coordinator.');
+      return;
+    }
     task.name = document.getElementById('nt-name')?.value?.trim() || task.name;
     task.category = editCategory;
-    task.assignedTo = document.getElementById('nt-assign')?.value || task.assignedTo;
+    task.assignedToIds = editAssignedToIds;
+    task.assignedTo = editAssignedToIds[0] || '';
     task.status = document.getElementById('nt-status')?.value || task.status;
     task.deadline = document.getElementById('nt-deadline')?.value || '';
     task.dbRequired = editIsDbWork ? true : !!document.getElementById('nt-db-required')?.checked;
@@ -2463,7 +2572,7 @@ function renderTimeline() {
   const isManager = APP.role === 'manager';
   if (!isManager && APP.timelineTab === 'manager') APP.timelineTab = 'task';
   let tasks = DATA.tasks;
-  if (!isManager && APP.user) tasks = tasks.filter(t => t.assignedTo === APP.user.id);
+  if (!isManager && APP.user) tasks = tasks.filter(t => isTaskAssignedToCurrentUser(t));
 
   // Group by month
   const byMonth = {};
@@ -3450,13 +3559,13 @@ async function updateDbCompanyStatus(companyId, status) {
   saveDbCompanies();
   if (prevStatus !== status) renderTrackDb();
 
-  // Manager-only: when status becomes Accepted, offer to create Confirmed Lead
-  if (status === 'Accepted' && APP.role === 'manager') {
+  // Offer to create Confirmed Lead when status becomes Accepted
+  if (status === 'Accepted') {
     if (entry.confirmedLeadId) {
       const existingLead = DATA.confirmedLeads.find(l => l.id === entry.confirmedLeadId);
       if (existingLead) {
         if (confirm('This entry already has a confirmed lead. Open/edit it?')) {
-          openConfirmedLeadModal(entry.confirmedLeadId);
+          openConfirmedLeadModal(encodeForAttr(entry.confirmedLeadId));
         }
         return;
       }
@@ -3470,7 +3579,9 @@ async function updateDbCompanyStatus(companyId, status) {
       organizationName: entry.companyName || '',
       category: matchCategory,
       pocId: entry.pocId || '',
-      sourceDbEntryId: entry.id
+      sourceDbEntryId: entry.id,
+      coordinatorId: entry.coordinatorId || '',
+      coordinatorName: entry.coordinatorName || (getCoordinator(entry.coordinatorId)?.name || '')
     });
   }
 }
@@ -3557,7 +3668,7 @@ function renderPerformance() {
 
   if (!isManager) {
     // Coordinator view — own performance
-    const myTasks = DATA.tasks.filter(t => t.assignedTo === APP.user?.id);
+    const myTasks = DATA.tasks.filter(t => isTaskAssignedToCurrentUser(t));
     const done = myTasks.filter(t => t.status === 'Done').length;
     const avgP = myTasks.length ? Math.round(myTasks.reduce((s,t)=>s+calcTaskProgress(t),0)/myTasks.length) : 0;
 
@@ -4071,6 +4182,10 @@ function initApp() {
     el.style.display = APP.role === 'manager' ? '' : 'none';
   });
 
+  // Show confirmed leads nav for all authenticated roles
+  const confirmedLeadsNav = document.getElementById('nav-confirmedleads');
+  if (confirmedLeadsNav) confirmedLeadsNav.style.display = '';
+
   // User avatar
   document.getElementById('user-avatar').textContent = APP.user?.initials || '?';
   document.getElementById('user-avatar-sidebar').textContent = APP.user?.initials || '?';
@@ -4152,10 +4267,30 @@ function addNotification(text, options = {}) {
 // ── CONFIRMED LEADS ──
 
 function renderConfirmedLeads() {
-  if (APP.role !== 'manager') return;
+  const canView = APP.role === 'manager' || APP.role === 'coordinator';
+  if (!canView) return;
   const el = document.getElementById('page-confirmedleads');
   if (!el) return;
-  const leads = Array.isArray(DATA.confirmedLeads) ? DATA.confirmedLeads : [];
+
+  normalizeAllConfirmedLeads();
+  const isManager = APP.role === 'manager';
+  const leads = getVisibleConfirmedLeads();
+
+  // Build deliverable stage summary for a lead
+  const buildStageSummary = (lead) => {
+    const delivs = Array.isArray(lead.deliverables) ? lead.deliverables : [];
+    if (!delivs.length) return '<span class="text-muted text-sm">—</span>';
+    const stages = {};
+    delivs.forEach(d => {
+      const s = d.stage || 'Other';
+      if (!stages[s]) stages[s] = { total: 0, done: 0 };
+      stages[s].total++;
+      if (d.completed) stages[s].done++;
+    });
+    return Object.entries(stages).map(([stage, { done, total }]) =>
+      `<div style="font-size:11px;white-space:nowrap"><span class="badge badge-blue" style="font-size:10px">${escapeHtml(stage)}</span> ${done}/${total}</div>`
+    ).join('');
+  };
 
   el.innerHTML = `
     <div class="section-header">
@@ -4168,6 +4303,7 @@ function renderConfirmedLeads() {
       </div>
     </div>
 
+    ${isManager ? `
     <div class="card mb-4">
       <div class="card-header"><span class="card-title">⚙️ Manage Categories</span></div>
       <div class="card-body">
@@ -4206,44 +4342,53 @@ function renderConfirmedLeads() {
           <button class="btn btn-secondary btn-sm" onclick="addConfirmedLeadStage()">+ Add</button>
         </div>
       </div>
-    </div>
+    </div>` : ''}
 
     ${leads.length ? `
     <div class="card">
-      <div class="card-header"><span class="card-title">All Confirmed Leads</span></div>
+      <div class="card-header">
+        <span class="card-title">${isManager ? 'All Confirmed Leads' : 'My Confirmed Leads'}</span>
+      </div>
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>Organization</th><th>POC</th><th>Category</th><th>Stage</th>
+            <th>Organization</th><th>POC</th><th>Category</th>
+            ${isManager ? '<th>Coordinator</th>' : ''}
             <th>MoU</th><th>Logo</th><th>Deliverables</th><th>Actions</th>
           </tr></thead>
           <tbody>
             ${leads.map(lead => {
+              normalizeConfirmedLead(lead);
               const poc = DATA.pocs.find(p => p.id === lead.pocId);
               const delivs = Array.isArray(lead.deliverables) ? lead.deliverables : [];
               const done = delivs.filter(d => d.completed).length;
               const mouLink = sanitizeUrl(lead.mouLink || '');
               const logoLink = sanitizeUrl(lead.logoLink || '');
               const encodedId = encodeForAttr(lead.id);
+              const canEdit = canEditConfirmedLead(lead);
+              const canDel = canDeleteConfirmedLead(lead);
               return `<tr>
                 <td class="td-main">${escapeHtml(lead.organizationName || '—')}</td>
                 <td>${poc ? escapeHtml(getPocDisplayName(poc)) : '<span class="text-muted">—</span>'}</td>
                 <td>${lead.category ? `<span class="badge badge-purple">${escapeHtml(lead.category)}</span>` : '—'}</td>
-                <td>${lead.stage ? `<span class="badge badge-blue">${escapeHtml(lead.stage)}</span>` : '—'}</td>
+                ${isManager ? `<td>${escapeHtml(lead.coordinatorName || '—')}</td>` : ''}
                 <td>${mouLink !== '#' ? `<a href="${mouLink}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm">Open MoU</a>` : '—'}</td>
                 <td>${logoLink !== '#' ? `<a href="${logoLink}" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm">Open Logo</a>` : '—'}</td>
                 <td>
                   <span class="badge badge-gray">${done}/${delivs.length} done</span>
+                  <div class="mt-1">${buildStageSummary(lead)}</div>
                   ${delivs.map(d => `
                     <div class="d-flex gap-1 mt-1" style="align-items:center;font-size:12px">
-                      <input type="checkbox" ${d.completed ? 'checked' : ''} onchange="toggleConfirmedLeadDeliverable('${encodedId}','${encodeForAttr(d.id)}',this.checked)">
+                      <input type="checkbox" ${d.completed ? 'checked' : ''} ${canEdit ? '' : 'disabled'} onchange="toggleConfirmedLeadDeliverable('${encodedId}','${encodeForAttr(d.id)}',this.checked)">
                       <span style="${d.completed ? 'text-decoration:line-through;color:var(--text-muted)' : ''}">${escapeHtml(d.text)}</span>
+                      ${d.stage ? `<span class="badge badge-blue" style="font-size:10px">${escapeHtml(d.stage)}</span>` : ''}
                     </div>`).join('')}
                 </td>
                 <td>
                   <div class="d-flex gap-2">
-                    <button class="btn btn-ghost btn-sm" onclick="openConfirmedLeadModal('${encodedId}')">✏️ Edit</button>
-                    <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="deleteConfirmedLead('${encodedId}')">🗑️</button>
+                    ${canEdit ? `<button class="btn btn-ghost btn-sm" onclick="openConfirmedLeadModal('${encodedId}')">✏️ Edit</button>` : ''}
+                    ${canDel ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="deleteConfirmedLead('${encodedId}')">🗑️</button>` : ''}
+                    ${!canEdit && !canDel ? '<span class="text-muted text-sm">—</span>' : ''}
                   </div>
                 </td>
               </tr>`;
@@ -4255,36 +4400,54 @@ function renderConfirmedLeads() {
     <div class="card">
       <div class="empty-state">
         <div class="empty-icon">🏆</div>
-        <div class="empty-title">No confirmed leads yet</div>
-        <div class="empty-desc">Add a confirmed lead manually or mark a Track DB company as Accepted.</div>
+        <div class="empty-title">${isManager ? 'No confirmed leads yet' : 'No confirmed leads assigned to you'}</div>
+        <div class="empty-desc">${isManager ? 'Add a confirmed lead manually or mark a Track DB company as Accepted.' : 'Contact your manager to get confirmed leads assigned to you.'}</div>
       </div>
     </div>`}
   `;
 }
 
 function openConfirmedLeadModal(encodedLeadId = '', prefill = {}) {
-  if (APP.role !== 'manager') return;
+  const canAccess = APP.role === 'manager' || APP.role === 'coordinator';
+  if (!canAccess) return;
   const leadId = encodedLeadId ? decodeFromAttr(encodedLeadId) : '';
   const existingLead = leadId ? DATA.confirmedLeads.find(l => l.id === leadId) : null;
+
+  if (existingLead && !canEditConfirmedLead(existingLead)) {
+    alert('You do not have permission to edit this confirmed lead.');
+    return;
+  }
+
   const lead = existingLead || {
     organizationName: prefill.organizationName || '',
     pocId: prefill.pocId || '',
     category: prefill.category || '',
-    stage: '',
     mouLink: '',
     logoLink: '',
     deliverables: [],
-    sourceDbEntryId: prefill.sourceDbEntryId || ''
+    sourceDbEntryId: prefill.sourceDbEntryId || '',
+    coordinatorId: prefill.coordinatorId || (APP.role === 'coordinator' ? APP.user?.id : ''),
+    coordinatorName: prefill.coordinatorName || (APP.role === 'coordinator' ? APP.user?.name : '')
   };
 
   document.getElementById('confirmed-lead-modal-title').textContent = existingLead ? 'Edit Confirmed Lead' : 'New Confirmed Lead';
   const encodedLead = leadId ? encodeForAttr(leadId) : '';
   document.getElementById('save-confirmed-lead-btn').onclick = () => saveConfirmedLeadFromModal(encodedLead, prefill.sourceDbEntryId);
 
-  const pocs = Array.isArray(DATA.pocs) ? DATA.pocs : [];
+  const selectablePocs = getPocsForConfirmedLeadSelection();
   const categories = getConfirmedLeadCategoryOptions(lead.category);
-  const stages = getConfirmedLeadStageOptions(lead.stage);
   const delivs = Array.isArray(lead.deliverables) ? lead.deliverables : [];
+
+  // Coordinator owner dropdown for managers
+  const coordinators = getUsersByRole('coordinator');
+  const coordinatorOwnerHtml = APP.role === 'manager' ? `
+    <div class="form-group">
+      <label class="form-label">Coordinator Owner (optional)</label>
+      <select class="form-select" id="cl-coordinator-select">
+        <option value="">— Manager-owned (no coordinator) —</option>
+        ${coordinators.map(c => `<option value="${c.id}" ${lead.coordinatorId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+      </select>
+    </div>` : '';
 
   document.getElementById('confirmed-lead-modal-body').innerHTML = `
     <div class="form-group">
@@ -4296,7 +4459,7 @@ function openConfirmedLeadModal(encodedLeadId = '', prefill = {}) {
       <label class="form-label">POC</label>
       <select class="form-select" id="cl-poc-select">
         <option value="">— Select POC —</option>
-        ${pocs.map(p => `<option value="${p.id}" ${lead.pocId === p.id ? 'selected' : ''}>${escapeHtml(getPocDisplayName(p))}</option>`).join('')}
+        ${selectablePocs.map(p => `<option value="${p.id}" ${lead.pocId === p.id ? 'selected' : ''}>${escapeHtml(getPocDisplayName(p))}</option>`).join('')}
       </select>
     </div>
 
@@ -4308,13 +4471,7 @@ function openConfirmedLeadModal(encodedLeadId = '', prefill = {}) {
       </select>
     </div>
 
-    <div class="form-group">
-      <label class="form-label">Stage</label>
-      <select class="form-select" id="cl-stage-select">
-        <option value="">— Select Stage —</option>
-        ${stages.map(s => `<option value="${escapeHtml(s)}" ${lead.stage === s ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('')}
-      </select>
-    </div>
+    ${coordinatorOwnerHtml}
 
     <div class="form-group">
       <label class="form-label">MoU</label>
@@ -4335,7 +4492,7 @@ function openConfirmedLeadModal(encodedLeadId = '', prefill = {}) {
     </div>
 
     <div class="form-group">
-      <label class="form-label">Deliverables</label>
+      <label class="form-label">Deliverables <span class="text-muted text-sm">(each has its own stage)</span></label>
       <div id="cl-deliverables-list">
         ${delivs.map((d, idx) => renderDeliverableRow(d, idx)).join('')}
       </div>
@@ -4347,10 +4504,18 @@ function openConfirmedLeadModal(encodedLeadId = '', prefill = {}) {
 }
 
 function renderDeliverableRow(d, idx) {
+  const stageOptions = getConfirmedLeadStageOptions(d.stage || '');
+  const stageSelectHtml = stageOptions.map(s =>
+    `<option value="${escapeHtml(s)}" ${(d.stage || '') === s ? 'selected' : ''}>${escapeHtml(s)}</option>`
+  ).join('');
   return `
-    <div class="form-row cl-deliverable-row" data-cl-deliv-idx="${idx}" style="align-items:center;margin-bottom:6px">
+    <div class="form-row cl-deliverable-row" data-cl-deliv-idx="${idx}" style="align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px">
       <input type="checkbox" ${d.completed ? 'checked' : ''} id="cl-deliv-done-${idx}" style="flex-shrink:0;cursor:pointer">
-      <input class="form-input" id="cl-deliv-text-${idx}" value="${escapeHtml(d.text || '')}" placeholder="Deliverable…" style="flex:1">
+      <input class="form-input" id="cl-deliv-text-${idx}" value="${escapeHtml(d.text || '')}" placeholder="Deliverable…" style="flex:1;min-width:120px">
+      <select class="form-select" id="cl-deliv-stage-${idx}" style="width:110px;flex-shrink:0">
+        <option value="">— Stage —</option>
+        ${stageSelectHtml}
+      </select>
       <button type="button" class="btn btn-ghost btn-sm" onclick="removeConfirmedLeadDeliverableRow(${idx})" style="flex-shrink:0">🗑️</button>
     </div>`;
 }
@@ -4377,9 +4542,15 @@ function collectConfirmedLeadDeliverablesFromForm() {
     const idx = row.dataset.clDelivIdx;
     const textEl = document.getElementById('cl-deliv-text-' + idx);
     const doneEl = document.getElementById('cl-deliv-done-' + idx);
+    const stageEl = document.getElementById('cl-deliv-stage-' + idx);
     const text = textEl?.value?.trim() || '';
     if (!text) return;
-    delivs.push({ id: createId('deliverable'), text, completed: !!(doneEl?.checked) });
+    delivs.push({
+      id: createId('deliverable'),
+      text,
+      stage: stageEl?.value || 'Other',
+      completed: !!(doneEl?.checked)
+    });
   });
   return delivs;
 }
@@ -4392,24 +4563,37 @@ function saveConfirmedLeadFromModal(encodedLeadId = '', sourceDbEntryId = '') {
   const pocId = document.getElementById('cl-poc-select')?.value || '';
   const pocEntry = DATA.pocs.find(p => p.id === pocId);
   const category = document.getElementById('cl-category-select')?.value || '';
-  const stage = document.getElementById('cl-stage-select')?.value || '';
   const mouLink = (document.getElementById('cl-mou-link')?.value || '').trim();
   const logoLink = (document.getElementById('cl-logo-link')?.value || '').trim();
   const deliverables = collectConfirmedLeadDeliverablesFromForm();
+
+  // Coordinator owner from dropdown (manager only) or current user (coordinator)
+  let coordinatorId = '';
+  let coordinatorName = '';
+  if (APP.role === 'manager') {
+    const coordSelect = document.getElementById('cl-coordinator-select');
+    coordinatorId = coordSelect?.value || '';
+    coordinatorName = coordinatorId ? (getCoordinator(coordinatorId)?.name || '') : '';
+  } else if (APP.role === 'coordinator') {
+    coordinatorId = APP.user?.id || '';
+    coordinatorName = APP.user?.name || '';
+  }
 
   const now = new Date().toISOString();
 
   if (leadId) {
     const lead = DATA.confirmedLeads.find(l => l.id === leadId);
     if (!lead) { alert('Lead not found.'); return; }
+    if (!canEditConfirmedLead(lead)) { alert('You do not have permission to edit this lead.'); return; }
     lead.organizationName = orgName;
     lead.pocId = pocId;
     lead.pocName = pocEntry ? pocEntry.name : '';
     lead.category = category;
-    lead.stage = stage;
     lead.mouLink = mouLink;
     lead.logoLink = logoLink;
     lead.deliverables = deliverables;
+    lead.coordinatorId = coordinatorId;
+    lead.coordinatorName = coordinatorName;
     lead.updatedAt = now;
     saveConfirmedLeads();
     closeConfirmedLeadModal();
@@ -4424,15 +4608,17 @@ function saveConfirmedLeadFromModal(encodedLeadId = '', sourceDbEntryId = '') {
     pocId,
     pocName: pocEntry ? pocEntry.name : '',
     category,
-    stage,
     mouLink,
     logoLink,
     deliverables,
     sourceDbEntryId: dbEntryId,
+    coordinatorId,
+    coordinatorName,
     createdAt: now,
     updatedAt: now,
     createdBy: APP.user?.id || '',
-    createdByName: APP.user?.name || ''
+    createdByName: APP.user?.name || '',
+    createdByRole: APP.role || ''
   };
   DATA.confirmedLeads.unshift(lead);
   saveConfirmedLeads();
@@ -4454,7 +4640,7 @@ function saveConfirmedLeadFromModal(encodedLeadId = '', sourceDbEntryId = '') {
 
 function closeConfirmedLeadModal() {
   const pendingDbEntryId = APP._pendingConfirmedLeadFromDbEntryId || '';
-  if (pendingDbEntryId) {
+  if (pendingDbEntryId && APP.role === 'manager') {
     // Came from Accepted DB entry flow - ask whether to keep Accepted status
     const keepAccepted = confirm('Confirmed lead details were not saved. Keep the entry status as Accepted?');
     if (!keepAccepted) {
@@ -4467,6 +4653,8 @@ function closeConfirmedLeadModal() {
       }
     }
     APP._pendingConfirmedLeadFromDbEntryId = '';
+  } else if (pendingDbEntryId) {
+    APP._pendingConfirmedLeadFromDbEntryId = '';
   }
   closeModal('confirmed-lead-modal');
 }
@@ -4475,8 +4663,12 @@ function deleteConfirmedLead(encodedLeadId) {
   const leadId = decodeFromAttr(encodedLeadId);
   const idx = DATA.confirmedLeads.findIndex(l => l.id === leadId);
   if (idx === -1) return;
-  if (!confirm('Delete this confirmed lead?')) return;
   const lead = DATA.confirmedLeads[idx];
+  if (!canDeleteConfirmedLead(lead)) {
+    alert('You do not have permission to delete this lead.');
+    return;
+  }
+  if (!confirm('Delete this confirmed lead?')) return;
   // Unlink from DB entry
   if (lead.sourceDbEntryId) {
     const dbEntry = DATA.dbCompanies.find(e => e.id === lead.sourceDbEntryId);
@@ -4621,6 +4813,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   console.log('APP INIT: users loaded =', APP.users.length);
   await syncAllAppData();
   normalizeAllTasks();
+  normalizeAllConfirmedLeads();
   console.log('Tasks available:', DATA.tasks.length);
   hydrateSession();
 
