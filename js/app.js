@@ -3209,7 +3209,7 @@ function addDbStatusOption() {
 function renameDbStatusOption(encodedOldStatus) {
   const oldStatus = decodeFromAttr(encodedOldStatus);
   if (oldStatus === 'Accepted') {
-    alert('Accepted is required for confirmed lead workflow and cannot be removed or renamed.');
+    alert('Accepted is required for confirmed lead workflow and cannot be renamed.');
     return;
   }
   const newName = prompt('Rename status:', oldStatus)?.trim();
@@ -3230,7 +3230,7 @@ function renameDbStatusOption(encodedOldStatus) {
 function deleteDbStatusOption(encodedStatus) {
   const status = decodeFromAttr(encodedStatus);
   if (status === 'Accepted') {
-    alert('Accepted is required for confirmed lead workflow and cannot be removed or renamed.');
+    alert('Accepted is required for confirmed lead workflow and cannot be deleted.');
     return;
   }
   const opts = getDbStatusOptions();
@@ -4419,7 +4419,7 @@ function closeConfirmedLeadModal() {
   const pendingDbEntryId = APP._pendingConfirmedLeadFromDbEntryId || '';
   if (pendingDbEntryId) {
     // Came from Accepted DB entry flow - ask whether to keep Accepted status
-    const keepAccepted = confirm('Status is Accepted but confirmed lead details were not added. Keep status Accepted?');
+    const keepAccepted = confirm('Confirmed lead details were not saved. Keep the entry status as Accepted?');
     if (!keepAccepted) {
       const dbEntry = DATA.dbCompanies.find(e => e.id === pendingDbEntryId);
       if (dbEntry) {
