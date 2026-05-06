@@ -395,8 +395,17 @@ function getUsersByRole(role) {
   }));
 }
 
+function getTaskAssigneeIds(task) {
+  if (Array.isArray(task.assignedToIds) && task.assignedToIds.length) return task.assignedToIds;
+  return task.assignedTo ? [task.assignedTo] : [];
+}
+
+function isTaskAssignedToCurrentUser(task) {
+  return APP.role === 'coordinator' && getTaskAssigneeIds(task).includes(APP.user?.id);
+}
+
 function getCoordinatorStats(userId) {
-  const tasks = DATA.tasks.filter(t => t.assignedTo === userId);
+  const tasks = DATA.tasks.filter(t => getTaskAssigneeIds(t).includes(userId));
   const done = tasks.filter(t => t.status === 'Done').length;
   const inProg = tasks.filter(t => t.status === 'In Progress').length;
   const performance = tasks.length
@@ -928,6 +937,13 @@ function normalizeTask(task) {
   if (!Array.isArray(task.comments)) task.comments = [];
   if (!Array.isArray(task.subtasks)) task.subtasks = [];
   if (!Array.isArray(task.timeline)) task.timeline = [];
+  // Migrate single assignedTo → assignedToIds
+  if (!Array.isArray(task.assignedToIds) || !task.assignedToIds.length) {
+    task.assignedToIds = task.assignedTo ? [task.assignedTo] : [];
+  }
+  if (!task.assignedTo && task.assignedToIds.length) {
+    task.assignedTo = task.assignedToIds[0];
+  }
   if (isDatabaseWorkTask(task)) {
     task.dbWorkflowEnabled = true;
     task.dbRequired = true;
@@ -1099,7 +1115,7 @@ function renderDashboard() {
 
   let tasksToShow = DATA.tasks;
   if (!isManager && APP.user) {
-    tasksToShow = DATA.tasks.filter(t => t.assignedTo === APP.user.id);
+    tasksToShow = DATA.tasks.filter(t => isTaskAssignedToCurrentUser(t));
   }
 
   el.innerHTML = `
@@ -1161,14 +1177,16 @@ function renderDashboard() {
           <tbody>
             ${tasksToShow.slice(0,5).map(t => {
               const p = calcTaskProgress(t);
-              const coord = getCoordinator(t.assignedTo);
+              const assigneeIds = getTaskAssigneeIds(t);
+              const assigneeNames = assigneeIds.map(id => getCoordinator(id)?.name || 'Unknown').filter(Boolean);
+              const firstCoord = assigneeIds.length ? getCoordinator(assigneeIds[0]) : {};
               return `<tr style="cursor:pointer" onclick="openTaskDetail('${t.id}')">
                 <td class="td-main">${t.name}</td>
                 <td>${catBadge(t.category)}</td>
                 ${isManager ? `<td>
                   <div class="d-flex items-center gap-2">
-                    <div class="avatar" style="width:24px;height:24px;font-size:10px">${coord.initials||'?'}</div>
-                    <span>${coord.name||'Unassigned'}</span>
+                    <div class="avatar" style="width:24px;height:24px;font-size:10px">${firstCoord.initials||'?'}</div>
+                    <span>${assigneeNames.join(', ') || 'Unassigned'}</span>
                   </div>
                 </td>` : ''}
                 <td>${statusBadge(t.status)}</td>
@@ -1221,7 +1239,7 @@ function greeting() {
 function renderTasks(filter) {
   const isManager = APP.role === 'manager';
   let tasks = DATA.tasks;
-  if (!isManager && APP.user) tasks = tasks.filter(t => t.assignedTo === APP.user.id);
+  if (!isManager && APP.user) tasks = tasks.filter(t => isTaskAssignedToCurrentUser(t));
 
   const el = document.getElementById('page-tasks');
 
@@ -1315,14 +1333,16 @@ function renderTaskRows(tasks, isManager) {
   if (!tasks.length) return `<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">No tasks found</div></div></td></tr>`;
   return tasks.map(t => {
     const p = calcTaskProgress(t);
-    const coord = getCoordinator(t.assignedTo);
+    const assigneeIds = getTaskAssigneeIds(t);
+    const assigneeNames = assigneeIds.map(id => getCoordinator(id)?.name || 'Unknown').filter(Boolean);
+    const firstCoord = assigneeIds.length ? getCoordinator(assigneeIds[0]) : {};
     return `<tr style="cursor:pointer" onclick="openTaskDetail('${t.id}')">
       <td class="td-main">${t.name}</td>
       <td>${catBadge(t.category)}</td>
       ${isManager ? `<td>
         <div class="d-flex items-center gap-2">
-          <div class="avatar" style="width:24px;height:24px;font-size:10px">${coord.initials||'?'}</div>
-          <span>${coord.name||'Unassigned'}</span>
+          <div class="avatar" style="width:24px;height:24px;font-size:10px">${firstCoord.initials||'?'}</div>
+          <span>${assigneeNames.join(', ') || 'Unassigned'}</span>
         </div>
       </td>` : ''}
       <td>${statusBadge(t.status)}</td>
@@ -1431,18 +1451,25 @@ function addDbEntity(taskId) {
   const task = getTask(taskId);
   if (!task) return;
   const isManager = APP.role === 'manager';
-  const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user?.id;
+  const isAssignedCoordinator = isTaskAssignedToCurrentUser(task);
   if (!isManager && !isAssignedCoordinator) return;
   const input = document.getElementById('db-entity-name-input-' + toDomSafeId(taskId));
   const entityName = input?.value?.trim();
   if (!entityName) { alert('Please enter an entity name.'); return; }
   const normalized = normalizeCompanyName(entityName);
-  // Conflict check across all tasks
+
+  // Conflict check A: entity already exists in Track DB
+  const trackDbConflict = DATA.dbCompanies.some(e => normalizeCompanyName(e.companyName) === normalized);
+  if (trackDbConflict) {
+    if (!confirm('⚠️ DB already exists for this company in Track DB. Contact manager before proceeding.\n\nDo you still want to add this entity?')) return;
+  }
+
+  // Conflict check B: entity already added by another coordinator in any task
   let conflictMsg = '';
   DATA.tasks.forEach(t => {
     if (!Array.isArray(t.dbEntities)) return;
     t.dbEntities.forEach(e => {
-      if (normalizeCompanyName(e.name) === normalized) {
+      if (normalizeCompanyName(e.name) === normalized && e.coordinatorId !== APP.user?.id) {
         const coordName = e.coordinatorName || getCoordinator(e.coordinatorId)?.name || 'Unknown';
         conflictMsg += `"${e.name}" already added by ${coordName} in task "${t.name}".\n`;
       }
@@ -1475,7 +1502,7 @@ function deleteDbEntity(taskId, entityId) {
   const task = getTask(taskId);
   if (!task) return;
   const isManager = APP.role === 'manager';
-  const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user?.id;
+  const isAssignedCoordinator = isTaskAssignedToCurrentUser(task);
   if (!isManager && !isAssignedCoordinator) return;
   if (!confirm('Delete this entity?')) return;
   task.dbEntities = (task.dbEntities || []).filter(e => e.id !== entityId);
@@ -1491,9 +1518,9 @@ async function uploadEntityCsv(taskId, entityId) {
   const task = getTask(taskId);
   if (!task || !APP.user) return;
   const isManager = APP.role === 'manager';
-  const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user.id;
+  const isAssignedCoordinator = isTaskAssignedToCurrentUser(task);
   if (!isManager && !isAssignedCoordinator) {
-    alert('Only the assigned coordinator or manager can upload CSV for this entity.');
+    alert('Only an assigned coordinator or manager can upload CSV for this entity.');
     return;
   }
   const entity = (task.dbEntities || []).find(e => e.id === entityId);
@@ -1531,14 +1558,15 @@ function openTaskDetail(taskId) {
   if (!task) return;
   normalizeTask(task);
   const isManager = APP.role === 'manager';
-  const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user?.id;
+  const isAssignedCoordinator = isTaskAssignedToCurrentUser(task);
   if (!isManager && !isAssignedCoordinator) {
     alert('You do not have access to this task.');
     return;
   }
   const canUpdateStatus = isManager || isAssignedCoordinator;
   const canEditEntities = isManager || isAssignedCoordinator;
-  const coord = getCoordinator(task.assignedTo);
+  const assigneeIds = getTaskAssigneeIds(task);
+  const assigneeNames = assigneeIds.map(id => getCoordinator(id)?.name || 'Unknown').filter(Boolean);
   const coordinators = getUsersByRole('coordinator');
   const p = calcTaskProgress(task);
   const encodedTaskId = encodeForAttr(task.id);
@@ -1619,9 +1647,11 @@ function openTaskDetail(taskId) {
     <div class="task-meta-grid">
       <div class="meta-item">
         <div class="meta-key">Assigned To</div>
-        <div class="d-flex items-center gap-2 mt-2">
-          <div class="avatar">${coord.initials||'?'}</div>
-          <div class="meta-val">${coord.name||'Unassigned'}</div>
+        <div class="d-flex items-center gap-2 mt-2" style="flex-wrap:wrap">
+          ${assigneeIds.length ? assigneeIds.map(id => {
+            const c = getCoordinator(id);
+            return `<div class="d-flex items-center gap-1"><div class="avatar" style="width:24px;height:24px;font-size:10px">${c.initials||'?'}</div><span class="text-sm">${escapeHtml(c.name||'Unknown')}</span></div>`;
+          }).join('') : '<div class="meta-val">Unassigned</div>'}
         </div>
       </div>
       <div class="meta-item">
@@ -1689,7 +1719,7 @@ function openTaskDetail(taskId) {
         <tbody>
           ${task.subtasks.length ? task.subtasks.map(s => {
             const rate = s.target ? Math.round((s.value/s.target)*100) : null;
-            const canToggle = isManager || (APP.role === 'coordinator' && task.assignedTo === APP.user?.id);
+            const canToggle = isManager || isAssignedCoordinator;
             return `<tr class="subtask-row">
               <td>${escapeHtml(s.name)}</td>
               <td>
@@ -1770,7 +1800,7 @@ function toggleSubtask(taskId, subId) {
   const task = getTask(taskId);
   if (!task) return;
   const isManager = APP.role === 'manager';
-  const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user?.id;
+  const isAssignedCoordinator = isTaskAssignedToCurrentUser(task);
   if (!isManager && !isAssignedCoordinator) return;
   const sub = task.subtasks.find(s => s.id === subId);
   if (!sub || sub.type !== 'checkbox') return;
@@ -1789,7 +1819,7 @@ function updateTaskStatus(taskId, status, selectEl) {
   if (!task || !APP.user) return;
   const prevStatus = task.status;
   const isManager = APP.role === 'manager';
-  const isAssignedCoordinator = APP.role === 'coordinator' && task.assignedTo === APP.user.id;
+  const isAssignedCoordinator = isTaskAssignedToCurrentUser(task);
   if (!isManager && !isAssignedCoordinator) {
     if (selectEl) selectEl.value = prevStatus;
     return;
@@ -1841,8 +1871,8 @@ function updateTaskAssignmentByEncoded(encodedTaskId, assignedTo, selectEl) {
 async function uploadTaskDbCsv(taskId) {
   const task = getTask(taskId);
   if (!task || !APP.user) return;
-  if (APP.role !== 'coordinator' || task.assignedTo !== APP.user.id) {
-    alert('Only the assigned coordinator can upload DB for this task.');
+  if (APP.role !== 'coordinator' || !isTaskAssignedToCurrentUser(task)) {
+    alert('Only an assigned coordinator can upload DB for this task.');
     return;
   }
   const fileInput = document.getElementById(`task-db-file-${toDomSafeId(task.id)}`);
